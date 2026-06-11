@@ -340,6 +340,7 @@ write docs/pkg/README.md <<'EOF'
 ---
 summary: Package summary.
 tags: [pkg, test]
+status: active
 ---
 
 # Package
@@ -353,17 +354,23 @@ write docs/pkg/notes.md <<'EOF'
 Same document page.
 EOF
 
-mkdir docs/pkg/child
-write docs/pkg/child/README.md <<'EOF'
+mkdir docs/pkg/sub_docs/child
+write docs/pkg/sub_docs/child/README.md <<'EOF'
 ---
 title: Child Title
 summary: Child summary.
 tags: [child]
+status: reference
 ---
 
 # Child
 
 Child body.
+EOF
+
+mkdir docs/pkg/_attachments
+write docs/pkg/_attachments/note.txt <<'EOF'
+Attachment.
 EOF`, { scope: "write" });
 assert.equal(result.ok, true);
 
@@ -374,7 +381,10 @@ assert.match(result.stdout, /body: docs\/pkg\/README\.md/);
 assert.match(result.stdout, /same-document pages \(2\)/);
 assert.match(result.stdout, /\[page\] docs\/pkg\/notes\.md/);
 assert.match(result.stdout, /child documents \(1\)/);
-assert.match(result.stdout, /docs\/pkg\/child/);
+assert.match(result.stdout, /docs\/pkg\/sub_docs\/child/);
+assert.match(result.stdout, /status: active/);
+assert.match(result.stdout, /status=reference/);
+assert.doesNotMatch(result.stdout, /_attachments/);
 assert.match(result.stdout, /recommended next commands/);
 
 const fatPackageCommands = [
@@ -417,8 +427,38 @@ result = await sandbox.run("lint_doc docs/pkg/README.md");
 assert.equal(result.ok, true);
 assert.equal(result.stdout, "no document lint issues found");
 
+result = await sandbox.run("lint_doc docs/pkg");
+assert.equal(result.ok, true);
+assert.equal(result.stdout, "no document lint issues found");
+
+result = await sandbox.run(`mkdir docs/pkg/direct-child
+write docs/pkg/direct-child/README.md <<'EOF'
+---
+summary: Direct child.
+tags: [direct]
+---
+
+# Direct Child
+EOF`, { scope: "write" });
+assert.equal(result.ok, true);
+
+result = await sandbox.run("lint_doc docs/pkg");
+assert.equal(result.ok, true);
+assert.match(result.stdout, /direct child directory is not part of the document tree/);
+assert.match(result.stdout, /docs\/pkg\/sub_docs\/direct-child\/README\.md/);
+
+result = await sandbox.run("inspect_doc docs/pkg");
+assert.equal(result.ok, true);
+assert.doesNotMatch(result.stdout, /child documents \(2\)/);
+assert.doesNotMatch(result.stdout, /title="Direct Child"/);
+assert.match(result.stdout, /docs\/pkg\/direct-child is not a child document/);
+
 result = await sandbox.run(`mkdir docs/bad
 write docs/bad/README.md <<'EOF'
+---
+status: stale
+---
+
 # Bad
 
 See [Missing](missing.md).
@@ -429,6 +469,7 @@ result = await sandbox.run("lint_doc docs/bad/README.md");
 assert.equal(result.ok, true);
 assert.match(result.stdout, /no frontmatter summary/);
 assert.match(result.stdout, /no frontmatter tags/);
+assert.match(result.stdout, /status should be one of active, draft, reference, archived/);
 assert.match(result.stdout, /broken internal link/);
 assert.match(result.stdout, /\[info\] reader-card/);
 assert.match(result.stdout, /\[error\] link/);

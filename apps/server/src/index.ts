@@ -59,6 +59,9 @@ const AGENT_CONTEXT_ROOT = "self";
 const LEGACY_AGENT_CONTEXT_ROOT = "docs/self";
 const SOURCES_ROOT = "sources";
 const SYSTEM_DOCUMENT_PATHS = new Set([AGENT_CONTEXT_ROOT, LEGACY_AGENT_CONTEXT_ROOT]);
+const CHILD_DOCUMENTS_DIRECTORY = "sub_docs";
+const DOCUMENT_ATTACHMENTS_DIRECTORY = "_attachments";
+const DOCUMENT_AUXILIARY_DIRECTORIES = new Set([DOCUMENT_ATTACHMENTS_DIRECTORY, CHILD_DOCUMENTS_DIRECTORY]);
 const CANONICAL_AGENT_CONTRACT = "AGENTS.md is the canonical operating contract. If any MCP/resource/help text conflicts with AGENTS.md, follow AGENTS.md and leave a note about the drift.";
 const AGENT_DOCUMENT_LOOP = "read -> locate -> patch -> verify -> organize";
 const RUN_SHELL_DSL_SUMMARY =
@@ -96,9 +99,12 @@ const MCP_RUN_SHELL_DESCRIPTION = [
   "- self/ is user-visible personal context, not hidden agent memory or an ordinary document. Read it when relevant; write only stable, durable user context.",
   "",
   "Reader contract:",
-  "- Directory = document package; README.md = document body; sibling .md files = pages; child directories = child documents.",
-  "- Reader opens a directory as README.md plus sibling pages, and previews child directories as child-document cards.",
-  "- Child-document cards use README frontmatter title/summary/tags when present, then fall back to # heading, first paragraph, and path tags.",
+  "- Directory = document package; README.md = document body; sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
+  "- _attachments/ stores files that belong to the current document and is not a child document.",
+  "- The physical directory tree is the source of truth for parent/child relationships; do not create hidden JSON indexes or ID-only folders unless the user explicitly asks.",
+  "- Durable README.md files may use frontmatter: title, summary, tags, status. Status values: active, draft, reference, archived.",
+  "- Reader opens a directory as README.md plus sibling pages, and previews sub_docs/<slug>/ directories as child-document cards.",
+  "- Child-document cards use sub_docs/<slug>/README.md frontmatter title/summary/tags/status when present, then fall back to # heading, first paragraph, and path tags.",
   "",
   "Safe operating loop:",
   "- Read the map and nearby files before writing.",
@@ -218,10 +224,12 @@ const WORKSPACE_INFO_BASE_TEXT = [
   "",
   "## Reader Contract",
   "",
-  "- Directory = document package; README.md = body; sibling .md files = pages; child directories = child documents.",
+  "- Directory = document package; README.md = body; sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
+  "- _attachments/ stores files that belong to the current document and is not a child document.",
+  "- The physical directory tree is the source of truth. Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
   "- Reader opens a directory as README.md plus sibling pages.",
-  "- Reader previews child directories as child-document cards.",
-  "- Child-document cards prefer README frontmatter title/summary/tags, then fall back to heading, first paragraph, and path tags.",
+  "- Reader previews sub_docs/<slug>/ directories as child-document cards.",
+  "- Child-document cards prefer README frontmatter title/summary/tags/status, then fall back to heading, first paragraph, and path tags.",
   "",
   "## Protected Layout",
   "",
@@ -323,7 +331,7 @@ const LLMS_TXT_RESOURCE_TEXT = [
   "",
   "## Operations",
   "",
-  "- Ingest: preserve or create a source, update the compiled wiki, update indexes if needed, append a journal event.",
+  "- Ingest: preserve or create a source, update the compiled wiki by editing document packages, append a journal event.",
   "- Query: search/read the compiled wiki first, consult sources for citations, then optionally file durable synthesis back into docs.",
   "- Lint: find contradictions, stale claims, orphan pages, missing cross-links, missing source links, wrong-layer writes, broken links, and concepts without pages.",
   "",
@@ -332,8 +340,10 @@ const LLMS_TXT_RESOURCE_TEXT = [
   "- Directory = document package.",
   "- `README.md` = document body.",
   "- Sibling `.md` files = same-document pages.",
-  "- Child directories = child documents.",
-  "- Reader cards use README frontmatter `title`, `summary`, and `tags` when available.",
+  "- `sub_docs/<slug>/` directories = child documents.",
+  "- `_attachments/` = files that belong to the current document; not a child document.",
+  "- The physical directory tree is the source of truth for parent/child relationships.",
+  "- Reader cards use README frontmatter `title`, `summary`, `tags`, and `status` when available.",
   "",
   "## Write Policy",
   "",
@@ -586,8 +596,9 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "- Directory = document package.",
   "- README.md = main body of that document package.",
   "- Sibling .md files = pages in the same document.",
-  "- Child directories = child documents.",
-  "- Use <parent>/<slug>/README.md for a child document.",
+  "- sub_docs/<slug>/ directories = child documents.",
+  "- _attachments/ = files that belong to the current document and are hidden from child-document navigation.",
+  "- Use <parent>/sub_docs/<slug>/README.md for a child document.",
   "- Use <parent>/<page>.md for a same-document page.",
   "- If a continuation is small, patch the README or add a sibling page instead of creating a child document.",
   "- If a package has many same-document pages, use `inspect_doc` suggestions to decide which durable subtopics deserve child document packages.",
@@ -602,17 +613,19 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "title: Clear Document Title",
   "summary: One sentence explaining what this document is for.",
   "tags: [product, mcp, reader]",
+  "status: active",
   "---",
   "```",
   "",
   "Card title falls back from frontmatter title to the first # heading to the directory name.",
   "Card summary falls back from frontmatter summary to the first prose paragraph.",
   "Card tags fall back from frontmatter tags to lightweight path-derived tags.",
+  "Status values are advisory: active, draft, reference, archived.",
   "",
   "## Safe Actions",
   "",
   "- Add or improve frontmatter summary/tags on important README files.",
-  "- Patch parent README indexes when moving or adding child documents.",
+  "- Patch parent README overview sections when moving or adding child documents.",
   "- Move low-confidence or generated material to archive/<reason>/ and create an archive README explaining why.",
   "- Append a journal entry describing what was organized and why.",
   "- Append implementation-log notes when the cleanup changes product behavior, docs, or MCP contract.",
@@ -868,6 +881,7 @@ type ChildDocumentCard = {
   readmePath?: string;
   title: string;
   summary: string;
+  status?: string;
   tags: string[];
   updatedAt: string;
   pageCount: number;
@@ -2269,7 +2283,7 @@ function mcpFileUri(filePath: string) {
 
 async function listChildDocumentCards(sandbox: WorkspaceSandbox, parentPath: string): Promise<ChildDocumentCard[]> {
   const entries = await sandbox.listFiles(parentPath);
-  const directories = entries.filter((entry) => entry.kind === "directory" && !isSystemDocumentPath(entry.path));
+  const directories = await collectChildDocumentEntries(sandbox, parentPath, entries);
   const cards = await Promise.all(directories.map((entry) => describeChildDocument(sandbox, entry.path)));
   return cards.sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
 }
@@ -2278,7 +2292,7 @@ async function buildDocumentPackage(sandbox: WorkspaceSandbox, documentPath: str
   const entries = await sandbox.listFiles(documentPath);
   const [siblingDocuments, childDocuments, pages] = await Promise.all([
     listSiblingDocumentCards(sandbox, documentPath),
-    listChildDocumentCardsFromEntries(sandbox, entries),
+    listChildDocumentCards(sandbox, documentPath),
     collectDocumentPages(sandbox, documentPath, entries)
   ]);
   return {
@@ -2306,6 +2320,14 @@ function isSystemDocumentPath(documentPath: string) {
   return SYSTEM_DOCUMENT_PATHS.has(documentPath.replace(/\/+$/, ""));
 }
 
+function isAuxiliaryDocumentDirectory(entry: WorkspaceFileEntry) {
+  return entry.kind === "directory" && DOCUMENT_AUXILIARY_DIRECTORIES.has(entry.name);
+}
+
+function isChildDocumentEntry(entry: WorkspaceFileEntry) {
+  return entry.kind === "directory" && !isSystemDocumentPath(entry.path) && !isAuxiliaryDocumentDirectory(entry);
+}
+
 function siblingDocumentParentPath(documentPath: string) {
   const normalized = documentPath.replace(/\/+$/, "") || ".";
   const parts = normalized.split("/").filter(Boolean);
@@ -2315,9 +2337,20 @@ function siblingDocumentParentPath(documentPath: string) {
 }
 
 async function listChildDocumentCardsFromEntries(sandbox: WorkspaceSandbox, entries: WorkspaceFileEntry[]) {
-  const directories = entries.filter((entry) => entry.kind === "directory" && !isSystemDocumentPath(entry.path));
+  const directories = entries.filter((entry) => entry.kind === "directory" && !isAuxiliaryDocumentDirectory(entry) && !isSystemDocumentPath(entry.path));
   const cards = await Promise.all(directories.map((entry) => describeChildDocument(sandbox, entry.path)));
   return cards.sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+}
+
+async function collectChildDocumentEntries(sandbox: WorkspaceSandbox, parentPath: string, entries: WorkspaceFileEntry[]) {
+  const rows: WorkspaceFileEntry[] = [];
+  const subDocsPath = `${parentPath.replace(/\/+$/, "")}/${CHILD_DOCUMENTS_DIRECTORY}`.replace(/^\.\//, "");
+  const hasSubDocs = entries.some((entry) => entry.kind === "directory" && entry.name === CHILD_DOCUMENTS_DIRECTORY);
+  if (hasSubDocs) {
+    const subDocEntries = await sandbox.listFiles(subDocsPath).catch(() => []);
+    rows.push(...subDocEntries.filter(isChildDocumentEntry));
+  }
+  return rows;
 }
 
 async function collectDocumentPages(
@@ -2365,17 +2398,19 @@ async function describeChildDocument(sandbox: WorkspaceSandbox, documentPath: st
   const entries = await sandbox.listFiles(documentPath);
   const readme = entries.find((entry) => entry.kind === "file" && entry.name.toLowerCase() === "readme.md");
   const markdownPages = entries.filter((entry) => entry.kind === "file" && /\.(md|markdown)$/i.test(entry.name));
-  const childDirs = entries.filter((entry) => entry.kind === "directory");
+  const childDirs = await collectChildDocumentEntries(sandbox, documentPath, entries);
+  const auxiliaryDirs = entries.filter(isAuxiliaryDocumentDirectory);
   const readmePath = readme?.path;
   const readmeText = readmePath ? await sandbox.readFile(readmePath).catch(() => "") : "";
   const parsed = parseDocumentReadme(readmeText, documentPath);
-  const updatedAt = latestEntryUpdate([readme, ...markdownPages, ...childDirs]);
+  const updatedAt = latestEntryUpdate([readme, ...markdownPages, ...childDirs, ...auxiliaryDirs]);
 
   return {
     path: documentPath,
     readmePath,
     title: parsed.title,
     summary: parsed.summary,
+    status: parsed.status,
     tags: parsed.tags.length ? parsed.tags : inferDocumentTags(documentPath),
     updatedAt,
     pageCount: markdownPages.length,
@@ -2388,6 +2423,7 @@ function parseDocumentReadme(content: string, documentPath: string) {
     return {
       title: titleFromPath(documentPath),
       summary: "",
+      status: undefined as string | undefined,
       tags: [] as string[]
     };
   }
@@ -2404,6 +2440,9 @@ function parseDocumentReadme(content: string, documentPath: string) {
   return {
     title,
     summary,
+    status: typeof parsed.data.status === "string" && parsed.data.status.trim()
+      ? parsed.data.status.trim().toLowerCase()
+      : undefined,
     tags: normalizeDocumentTags(parsed.data.tags)
   };
 }

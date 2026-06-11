@@ -75,15 +75,20 @@ journal/2026/05/2026-05-01.md</code></pre>
           <h2>Folders are documents</h2>
           <p>
             A directory is a document package. <code>README.md</code> is the body, sibling Markdown files are pages,
-            and child directories are child documents. It stays readable for people and editable by agents.
+            <code>sub_docs/</code> contains child documents, and <code>_attachments/</code> stores files owned by
+            the current document. It stays readable for people and editable by agents.
           </p>
           <pre><code>docs/ai-meditations/
   README.md
-  product/
-    README.md
-  dev/
-    decisions/
-      README.md</code></pre>
+  _attachments/
+  sub_docs/
+    product/
+      README.md
+    dev/
+      README.md
+      sub_docs/
+        decisions/
+          README.md</code></pre>
         </article>
       </section>
 
@@ -129,7 +134,8 @@ journal/2026/05/2026-05-01.md</code></pre>
 
         <h2>文件夹即文档</h2>
         <p>
-          一个目录就是一个文档包。<code>README.md</code> 是正文，同级 Markdown 是页面，子目录是子文档。
+          一个目录就是一个文档包。<code>README.md</code> 是正文，同级 Markdown 是页面，<code>sub_docs/</code> 里放子文档。
+          <code>_attachments/</code> 存放当前文档的附件，不算子文档。
           这样人能阅读，Agent 也能用普通文件操作维护。
         </p>
 

@@ -4,6 +4,9 @@ import path from "node:path";
 const AGENT_CONTEXT_ROOT = "self";
 const LEGACY_AGENT_CONTEXT_ROOT = "docs/self";
 const SOURCES_ROOT = "sources";
+const CHILD_DOCUMENTS_DIRECTORY = "sub_docs";
+const DOCUMENT_ATTACHMENTS_DIRECTORY = "_attachments";
+const DOCUMENT_AUXILIARY_DIRECTORIES = new Set([CHILD_DOCUMENTS_DIRECTORY, DOCUMENT_ATTACHMENTS_DIRECTORY]);
 
 export async function ensureDefaultWorkspace(root: string) {
   const dirs = ["docs", SOURCES_ROOT, AGENT_CONTEXT_ROOT, "journal", "archive", ".meditations/trash"];
@@ -12,6 +15,7 @@ export async function ensureDefaultWorkspace(root: string) {
   }
 
   await migrateAgentContextRoot(root);
+  await migrateChildDocumentsToSubDocs(root);
   await writeIfMissing(path.join(root, "AGENTS.md"), defaultAgentsContent());
   await writeIfMissing(
     path.join(root, "index.md"),
@@ -38,7 +42,21 @@ export async function ensureDefaultWorkspace(root: string) {
       "- A directory is a document package.",
       "- `README.md` is the document body.",
       "- Sibling `.md` files are pages in the same document.",
-      "- Child directories are child documents.",
+      "- `sub_docs/<slug>/` directories are child documents.",
+      "- `_attachments/` stores files that belong to this document and is not a child document.",
+      "",
+      "Recommended README frontmatter:",
+      "",
+      "```yaml",
+      "---",
+      "title: Example Document",
+      "summary: One sentence explaining what this document is for.",
+      "tags: [example, guide]",
+      "status: active",
+      "---",
+      "```",
+      "",
+      "Status values: `active`, `draft`, `reference`, `archived`.",
       "",
       "Use `sources/` for raw inputs, `journal/` for timeline notes, and `self/` only for stable user context."
     ].join("\n")
@@ -126,6 +144,43 @@ async function migrateAgentContextRoot(root: string) {
   if (!remaining.length) await fs.rm(legacy, { recursive: true, force: true });
 }
 
+async function migrateChildDocumentsToSubDocs(root: string) {
+  for (const docsRootName of ["docs", "topics"]) {
+    const docsRoot = path.join(root, docsRootName);
+    if (await pathExists(docsRoot)) await migrateDocumentPackageChildren(docsRoot, true);
+  }
+}
+
+async function migrateDocumentPackageChildren(packageAbs: string, isRoot: boolean) {
+  const entries = await fs.readdir(packageAbs, { withFileTypes: true }).catch(() => []);
+
+  const subDocsAbs = path.join(packageAbs, CHILD_DOCUMENTS_DIRECTORY);
+  if (await pathExists(subDocsAbs)) {
+    const subDocEntries = await fs.readdir(subDocsAbs, { withFileTypes: true }).catch(() => []);
+    for (const entry of subDocEntries) {
+      if (entry.isDirectory()) await migrateDocumentPackageChildren(path.join(subDocsAbs, entry.name), false);
+    }
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || DOCUMENT_AUXILIARY_DIRECTORIES.has(entry.name)) continue;
+    const childAbs = path.join(packageAbs, entry.name);
+    const childHasReadme = await pathExists(path.join(childAbs, "README.md"));
+
+    if (isRoot) {
+      await migrateDocumentPackageChildren(childAbs, false);
+      continue;
+    }
+
+    if (!childHasReadme) continue;
+    await fs.mkdir(subDocsAbs, { recursive: true });
+    const targetAbs = path.join(subDocsAbs, entry.name);
+    if (await pathExists(targetAbs)) continue;
+    await fs.rename(childAbs, targetAbs);
+    await migrateDocumentPackageChildren(targetAbs, false);
+  }
+}
+
 async function ensureStarterDocument(root: string) {
   const markerPath = path.join(root, ".meditations", "starter-created");
   if (await pathExists(markerPath)) return;
@@ -164,11 +219,15 @@ async function ensureStarterDocument(root: string) {
       "docs/example/",
       "  README.md",
       "  second-page.md",
-      "  child-document/",
-      "    README.md",
+      "  _attachments/",
+      "  sub_docs/",
+      "    child-document/",
+      "      README.md",
       "```",
       "",
-      "`README.md` is the main page. Other Markdown files in the same directory are pages in the same document. Child folders are child documents.",
+      "`README.md` is the main page. Other Markdown files in the same directory are pages in the same document. `sub_docs/<slug>/` folders are child documents. `_attachments/` belongs to the current document and is not shown as a child document.",
+      "",
+      "The physical directory tree is the source of truth. Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
       "",
       "## 中文",
       "",
@@ -231,11 +290,28 @@ function defaultAgentsContent() {
     "docs/example-document/",
     "  README.md",
     "  second-page.md",
-    "  child-document/",
-    "    README.md",
+    "  _attachments/",
+    "  sub_docs/",
+    "    child-document/",
+    "      README.md",
     "```",
     "",
-    "`README.md` is the body of its directory. Other `.md` files in the same directory are pages in the same document. Child directories are child documents.",
+    "`README.md` is the body of its directory. Other `.md` files in the same directory are pages in the same document. `sub_docs/<slug>/` directories are child documents. `_attachments/` stores files that belong to the current document and is not a child document.",
+    "",
+    "The physical directory tree is the source of truth for parent/child relationships. Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
+    "",
+    "Durable document README files should use lightweight frontmatter when possible:",
+    "",
+    "```yaml",
+    "---",
+    "title: Example Document",
+    "summary: One sentence explaining what this document is for.",
+    "tags: [example, guide]",
+    "status: active",
+    "---",
+    "```",
+    "",
+    "Allowed status values: `active`, `draft`, `reference`, `archived`.",
     "",
     "## Standard Operations",
     "",

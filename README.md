@@ -17,11 +17,28 @@ Oclow treats directories as document packages:
 
 ```text
 docs/example/
-  README.md          # main page of this document
-  second-page.md     # another page in the same document
-  child-document/
-    README.md        # child document
+  README.md          # main page of this document package
+  second-page.md     # another page in the same document package
+  _attachments/      # files owned by this document; not a child document
+  sub_docs/
+    child-document/
+      README.md      # child document
 ```
+
+The physical directory tree is the source of truth for parent/child relationships. Oclow does not require hidden JSON node indexes for normal document structure.
+
+Durable document README files can provide lightweight card metadata:
+
+```yaml
+---
+title: Example Document
+summary: One sentence explaining what this document is for.
+tags: [example, guide]
+status: active
+---
+```
+
+Supported status values are `active`, `draft`, `reference`, and `archived`.
 
 The default workspace layout:
 

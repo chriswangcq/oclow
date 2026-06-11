@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
+import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AuditEvent, SandboxCommandResult, SandboxScope, WorkspaceFileEntry } from "@ai-meditations/shared";
@@ -46,6 +47,7 @@ type MarkdownSection = {
 type MarkdownMetadata = {
   title?: string;
   summary?: string;
+  status?: string;
   tags: string[];
   headings: number;
   firstParagraph?: string;
@@ -63,6 +65,7 @@ type DocumentInspectionChild = {
   readmePath?: string;
   title: string;
   summary?: string;
+  status?: string;
   tags: string[];
   hasReadme: boolean;
 };
@@ -74,6 +77,7 @@ type DocumentInspection = {
   currentFile?: string;
   title?: string;
   summary?: string;
+  status?: string;
   tags?: string[];
   pages?: DocumentInspectionPage[];
   childDocuments?: DocumentInspectionChild[];
@@ -124,6 +128,10 @@ const WORKSPACE_HEALTH_SPECIAL_FILES = ["AGENTS.md", "index.md"];
 const PROTECTED_ROOT_DIRECTORIES = new Set(["docs", "sources", "journal", "archive"]);
 const PROTECTED_SYSTEM_PATHS = new Set(["self", "docs/self"]);
 const LEGACY_ROOT_ALIASES = new Map([["topics", "docs"]]);
+const CHILD_DOCUMENTS_DIRECTORY = "sub_docs";
+const DOCUMENT_ATTACHMENTS_DIRECTORY = "_attachments";
+const DOCUMENT_AUXILIARY_DIRECTORIES = new Set([DOCUMENT_ATTACHMENTS_DIRECTORY, CHILD_DOCUMENTS_DIRECTORY]);
+const DOCUMENT_STATUS_VALUES = new Set(["active", "draft", "reference", "archived"]);
 
 const READ_COMMANDS = new Set([
   "help",
@@ -571,23 +579,32 @@ export class WorkspaceSandbox {
       );
     }
 
-    const childDirs = entries.filter((entry) => entry.isDirectory() && entry.name !== ".meditations").sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of childDirs) {
-      const childPath = toVirtualPath(path.posix.join(virtualPath, entry.name));
-      const childReadmeAbs = path.join(abs, entry.name, "README.md");
+    const directDocumentDirs = this.directDocumentDirectories(virtualPath, abs, entries);
+    if (directDocumentDirs.length) {
+      suggestions.push(
+        ...directDocumentDirs.map(
+          (entry) => `${entry.virtualPath} is not a child document in the current model; move it to ${virtualPath}/${CHILD_DOCUMENTS_DIRECTORY}/${entry.name}/README.md.`
+        )
+      );
+    }
+
+    const childDirs = await this.documentChildDirectories(virtualPath, abs, entries);
+    for (const child of childDirs) {
+      const childReadmeAbs = path.join(child.abs, "README.md");
       const hasReadme = await pathExists(childReadmeAbs);
       const childMeta = hasReadme ? await readMarkdownMetadata(childReadmeAbs, this.options.readLimitBytes) : undefined;
       childDocuments.push({
-        path: childPath,
-        readmePath: hasReadme ? toVirtualPath(path.posix.join(childPath, "README.md")) : undefined,
-        title: childMeta?.title ?? entry.name,
+        path: child.virtualPath,
+        readmePath: hasReadme ? toVirtualPath(path.posix.join(child.virtualPath, "README.md")) : undefined,
+        title: childMeta?.title ?? child.name,
         summary: childMeta?.summary,
+        status: childMeta?.status,
         tags: childMeta?.tags ?? [],
         hasReadme
       });
-      if (!hasReadme) warnings.push(`child document is missing README.md: ${childPath}`);
-      if (hasReadme && !childMeta?.summary) suggestions.push(`${childPath} has no README frontmatter summary; Reader card may be weak.`);
-      if (hasReadme && !childMeta?.tags.length) suggestions.push(`${childPath} has no README frontmatter tags; Reader card may be weak.`);
+      if (!hasReadme) warnings.push(`child document is missing README.md: ${child.virtualPath}`);
+      if (hasReadme && !childMeta?.summary) suggestions.push(`${child.virtualPath} has no README frontmatter summary; Reader card may be weak.`);
+      if (hasReadme && !childMeta?.tags.length) suggestions.push(`${child.virtualPath} has no README frontmatter tags; Reader card may be weak.`);
     }
 
     if (virtualPath === "docs" && markdownPages.length > 0) {
@@ -601,6 +618,7 @@ export class WorkspaceSandbox {
       currentFile: readmePath,
       title: metadata?.title,
       summary: metadata?.summary,
+      status: metadata?.status,
       tags: metadata?.tags ?? [],
       pages,
       childDocuments,
@@ -932,6 +950,7 @@ export class WorkspaceSandbox {
     }
 
     if (!stat.isDirectory()) return;
+    if (isAttachmentsPath(canonicalWorkspacePath(virtualPath))) return;
     if (scan.directories >= WORKSPACE_HEALTH_DIRECTORY_LIMIT) {
       scan.skippedDirectories += 1;
       return;
@@ -1002,10 +1021,12 @@ export class WorkspaceSandbox {
 
   private async lintDocumentDirectory(virtualPath: string, abs: string, options: { shallow?: boolean } = {}) {
     const issues: string[] = [];
+    if (isNonDocumentContainerPath(virtualPath)) return issues;
     const entries = await fs.readdir(abs, { withFileTypes: true });
     const hasReadme = entries.some((entry) => entry.isFile() && entry.name === "README.md");
     const mdPages = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== "README.md");
-    const childDirs = entries.filter((entry) => entry.isDirectory() && entry.name !== ".meditations");
+    const directDocumentDirs = this.directDocumentDirectories(virtualPath, abs, entries);
+    const childDirs = await this.documentChildDirectories(virtualPath, abs, entries);
     const canonicalPath = canonicalWorkspacePath(virtualPath);
 
     if (!hasReadme && canonicalPath !== "." && isDocumentLikeDirectory(canonicalPath)) {
@@ -1018,14 +1039,57 @@ export class WorkspaceSandbox {
       issues.push(lintIssue("warn", "placement", `docs root contains same-document pages (${mdPages.map((entry) => entry.name).join(", ")}); top-level durable subjects should usually be child document packages`));
     }
     if (!options.shallow) {
+      for (const entry of directDocumentDirs) {
+        issues.push(
+          lintIssue(
+            "warn",
+            "document-package",
+            `direct child directory is not part of the document tree; move to ${virtualPath}/${CHILD_DOCUMENTS_DIRECTORY}/${entry.name}/README.md: ${entry.virtualPath}`
+          )
+        );
+      }
       for (const entry of childDirs) {
-        const childPath = toVirtualPath(path.posix.join(virtualPath, entry.name));
-        if (!(await pathExists(path.join(abs, entry.name, "README.md"))) && isDocumentLikeDirectory(canonicalWorkspacePath(childPath))) {
-          issues.push(lintIssue("error", "document-package", `child document missing README.md: ${childPath}`));
+        if (!(await pathExists(path.join(entry.abs, "README.md"))) && isDocumentLikeDirectory(canonicalWorkspacePath(entry.virtualPath))) {
+          issues.push(lintIssue("error", "document-package", `child document missing README.md: ${entry.virtualPath}`));
         }
       }
     }
     return issues;
+  }
+
+  private async documentChildDirectories(virtualPath: string, abs: string, entries: Dirent[]) {
+    const rows: Array<{ name: string; virtualPath: string; abs: string }> = [];
+    const container = entries.find((entry) => entry.isDirectory() && entry.name === CHILD_DOCUMENTS_DIRECTORY);
+    if (container) {
+      const containerAbs = path.join(abs, CHILD_DOCUMENTS_DIRECTORY);
+      const containerPath = toVirtualPath(path.posix.join(virtualPath, CHILD_DOCUMENTS_DIRECTORY));
+      const containerEntries = await fs.readdir(containerAbs, { withFileTypes: true }).catch(() => []);
+      for (const entry of containerEntries) {
+        if (!entry.isDirectory() || !isDocumentChildDirectoryName(entry.name)) continue;
+        rows.push({
+          name: entry.name,
+          virtualPath: toVirtualPath(path.posix.join(containerPath, entry.name)),
+          abs: path.join(containerAbs, entry.name)
+        });
+      }
+    }
+
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private directDocumentDirectories(virtualPath: string, abs: string, entries: Dirent[]) {
+    if (!shouldPreferSubDocsContainer(virtualPath)) return [];
+    const rows: Array<{ name: string; virtualPath: string; abs: string }> = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !isDocumentChildDirectoryName(entry.name)) continue;
+      const childPath = toVirtualPath(path.posix.join(virtualPath, entry.name));
+      rows.push({
+        name: entry.name,
+        virtualPath: childPath,
+        abs: path.join(abs, entry.name)
+      });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   private async lintMarkdownDocument(virtualPath: string, abs: string, args: string[]) {
@@ -1061,6 +1125,15 @@ export class WorkspaceSandbox {
     if (basename === "README.md" && root === "docs" && virtualPath.split("/").length >= 3) {
       if (!frontmatter.summary) issues.push(lintIssue("info", "reader-card", `README child-document card has no frontmatter summary: ${virtualPath}`));
       if (!frontmatter.tags.length) issues.push(lintIssue("info", "reader-card", `README child-document card has no frontmatter tags: ${virtualPath}`));
+      if (frontmatter.status && !DOCUMENT_STATUS_VALUES.has(frontmatter.status)) {
+        issues.push(
+          lintIssue(
+            "warn",
+            "reader-card",
+            `README frontmatter status should be one of ${[...DOCUMENT_STATUS_VALUES].join(", ")}: ${virtualPath}`
+          )
+        );
+      }
     }
 
     if (root === "docs" && looksLikeJournalResidue(text)) {
@@ -1608,6 +1681,7 @@ function formatDocumentInspection(info: DocumentInspection) {
     info.currentFile ? `current_file: ${info.currentFile}` : undefined,
     info.title ? `title: ${info.title}` : undefined,
     info.summary ? `summary: ${info.summary}` : undefined,
+    info.status ? `status: ${info.status}` : undefined,
     info.tags?.length ? `tags: ${info.tags.join(", ")}` : undefined,
     ""
   ].filter((line): line is string => line !== undefined);
@@ -1626,8 +1700,9 @@ function formatDocumentInspection(info: DocumentInspection) {
     lines.push(`child documents (${info.childDocuments.length}):`);
     for (const child of info.childDocuments) {
       const summary = child.summary ? ` summary="${child.summary}"` : "";
+      const status = child.status ? ` status=${child.status}` : "";
       const tags = child.tags.length ? ` tags=[${child.tags.join(", ")}]` : "";
-      lines.push(`- ${child.path}${child.hasReadme ? "" : " (missing README.md)"} title="${child.title}"${summary}${tags}`);
+      lines.push(`- ${child.path}${child.hasReadme ? "" : " (missing README.md)"} title="${child.title}"${summary}${status}${tags}`);
     }
     lines.push("");
   } else {
@@ -1649,6 +1724,24 @@ function formatDocumentInspection(info: DocumentInspection) {
   lines.push("recommended next commands:");
   lines.push(...info.recommendedCommands.map((command) => `- ${command}`));
   return lines.join("\n");
+}
+
+function isDocumentChildDirectoryName(name: string) {
+  return name !== ".meditations" && !DOCUMENT_AUXILIARY_DIRECTORIES.has(name);
+}
+
+function shouldPreferSubDocsContainer(virtualPath: string) {
+  const canonical = canonicalWorkspacePath(virtualPath);
+  return canonical.startsWith("docs/") && path.posix.basename(canonical) !== CHILD_DOCUMENTS_DIRECTORY;
+}
+
+function isNonDocumentContainerPath(virtualPath: string) {
+  const canonical = canonicalWorkspacePath(virtualPath);
+  return isAttachmentsPath(canonical) || path.posix.basename(canonical) === CHILD_DOCUMENTS_DIRECTORY;
+}
+
+function isAttachmentsPath(virtualPath: string) {
+  return virtualPath.split("/").includes(DOCUMENT_ATTACHMENTS_DIRECTORY);
 }
 
 function formatSimpleDiff(beforeLabel: string, afterLabel: string, beforeText: string, afterText: string) {
@@ -1724,6 +1817,7 @@ async function readMarkdownMetadata(abs: string, readLimitBytes: number): Promis
   return {
     title,
     summary: frontmatter.summary ?? firstParagraph,
+    status: frontmatter.status,
     tags: frontmatter.tags,
     headings: headings.length,
     firstParagraph
@@ -1731,13 +1825,18 @@ async function readMarkdownMetadata(abs: string, readLimitBytes: number): Promis
 }
 
 function parseMarkdownFrontmatter(text: string) {
-  const empty = { title: undefined as string | undefined, summary: undefined as string | undefined, tags: [] as string[] };
-  if (!text.startsWith("---\n")) return empty;
-  const end = text.indexOf("\n---", 4);
-  if (end < 0) return empty;
-  const body = text.slice(4, end).split(/\r?\n/);
+  const empty = {
+    title: undefined as string | undefined,
+    summary: undefined as string | undefined,
+    status: undefined as string | undefined,
+    tags: [] as string[]
+  };
+  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) return empty;
+  const body = match[1].split(/\r?\n/);
   let title: string | undefined;
   let summary: string | undefined;
+  let status: string | undefined;
   let tags: string[] = [];
   for (const line of body) {
     const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
@@ -1746,16 +1845,14 @@ function parseMarkdownFrontmatter(text: string) {
     const value = match[2].trim();
     if (key === "title") title = unquoteYamlScalar(value);
     if (key === "summary") summary = unquoteYamlScalar(value);
+    if (key === "status") status = unquoteYamlScalar(value).toLowerCase();
     if (key === "tags") tags = parseInlineTags(value);
   }
-  return { title, summary, tags };
+  return { title, summary, status, tags };
 }
 
 function stripMarkdownFrontmatter(text: string) {
-  if (!text.startsWith("---\n")) return text;
-  const end = text.indexOf("\n---", 4);
-  if (end < 0) return text;
-  return text.slice(end + 4).replace(/^\r?\n/, "");
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
 }
 
 function parseInlineTags(value: string) {
@@ -2058,6 +2155,7 @@ function isProtectedSystemPath(virtualPath: string) {
 
 function isDocumentLikeDirectory(virtualPath: string) {
   if (virtualPath === "." || virtualPath === "archive") return false;
+  if (isNonDocumentContainerPath(virtualPath)) return false;
   const root = virtualPath.split("/")[0] ?? "";
   return ["docs", "sources", "journal", "self"].includes(root);
 }
@@ -2460,8 +2558,10 @@ function helpText(document?: string) {
       "Example document package README:",
       "write docs/example/README.md <<EOF",
       "---",
+      "title: Example",
       "summary: What this document is for.",
       "tags: [document]",
+      "status: active",
       "---",
       "",
       "# Example",
@@ -2470,7 +2570,7 @@ function helpText(document?: string) {
       "EOF",
       "",
       "Prefer patch or append when updating an existing file.",
-      "Use README frontmatter title/summary/tags when you want the Reader child-document card to be clearer."
+      "Use README frontmatter title/summary/tags/status when you want the Reader child-document card to be clearer."
     ].join("\n");
   }
 
@@ -2665,7 +2765,7 @@ function helpText(document?: string) {
       "- the README body path",
       "- same-document pages",
       "- child documents",
-      "- Reader card title/summary/tags when available",
+      "- Reader card title/summary/tags/status when available",
       "- structural warnings, suggestions, and recommended next commands",
       "",
       "Use inspect_doc before creating a new page or child document."
@@ -2738,6 +2838,7 @@ function helpText(document?: string) {
       "- page-heavy document packages that may need child documents",
       "- missing README.md in document packages",
       "- missing child-document card summary/tags",
+      "- invalid README frontmatter status",
       "- wrong-layer writes between docs/, sources/, journal/, and self/",
       "- docs files that look like journal/session residue",
       "- sources files that look like compiled wiki synthesis",
@@ -2767,15 +2868,32 @@ function helpText(document?: string) {
       "- Directory = document package.",
       "- README.md = document body.",
       "- Sibling .md files = pages in the same document; Reader expands them after README.md.",
-      "- Child directories = child documents; Reader shows them in navigation and as cards below the current document.",
+      "- sub_docs/<slug>/ directories = child documents; Reader shows them in navigation and as cards below the current document.",
+      "- _attachments/ = files that belong to the current document; it is not a child document.",
       "- Document: docs/<slug>/README.md.",
-      "- Child document: <parent>/<slug>/README.md.",
+      "- Child document: <parent>/sub_docs/<slug>/README.md.",
       "- Same-document page: <parent>/<page>.md.",
+      "",
+      "Tree contract:",
+      "- The physical directory tree is the source of truth for parent/child relationships.",
+      "- Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
+      "- Keep slugs stable and readable. Prefer lowercase-kebab-case for directory and page names.",
+      "",
+      "Recommended README frontmatter for durable docs:",
+      "---",
+      "title: Example Document",
+      "summary: One sentence explaining what this document is for.",
+      "tags: [example, guide]",
+      "status: active",
+      "---",
+      "",
+      "status values: active, draft, reference, archived.",
       "",
       "Child-document cards:",
       "- Title: README frontmatter title, then README # heading, then directory name.",
       "- Summary: README frontmatter summary, then first prose paragraph.",
       "- Tags: README frontmatter tags, then path-derived tags.",
+      "- Status is advisory metadata for agents and future UI; it does not change file permissions.",
       "",
       "Journal:",
       "- Journal note: journal/YYYY/MM/YYYY-MM-DD.md.",
@@ -2869,8 +2987,10 @@ function helpText(document?: string) {
     "",
     "Document conventions:",
     "- Directory = document package; README.md = body.",
-    "- Sibling .md files = pages; child directories = child documents.",
-    "- Reader renders child directories as preview cards using README title/summary/tags.",
+    "- Sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
+    "- _attachments/ stores files for the current document; it is not a child document.",
+    "- The physical directory tree is the source of truth; do not create hidden JSON indexes unless the user asks.",
+    "- Reader renders sub_docs/<slug>/ directories as preview cards using README title/summary/tags/status.",
     "- sources/ holds raw source material; docs/ holds compiled wiki pages.",
     "- Journal note: journal/YYYY/MM/YYYY-MM-DD.md",
     "- Default fresh context to journal; compile only stable reusable knowledge to docs.",

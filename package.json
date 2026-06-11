@@ -1,0 +1,22 @@
+{
+  "name": "ai-meditations",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @ai-meditations/server",
+    "build": "npm run build -w @ai-meditations/shared && npm run build -w @ai-meditations/sandbox && npm run build -w @ai-meditations/server",
+    "typecheck": "npm run build -w @ai-meditations/shared && npm run typecheck -w @ai-meditations/sandbox && npm run typecheck -w @ai-meditations/server",
+    "test": "npm run build -w @ai-meditations/shared && npm run test -w @ai-meditations/sandbox",
+    "smoke:mcp": "node apps/server/scripts/mcp-smoke-test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

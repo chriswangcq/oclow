@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+apps/*/dist/
+packages/*/dist/
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+packages/*/src/**/*.d.ts
+
+# Local env and runtime data
+.env
+.env.*
+!.env.example
+.meditations-data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# OS/editor noise
+.DS_Store
+
+# Local/private workspace material
+.complex-problems/
+.gemini-cdp-profile/
+00_inbox/
+01_memory/
+02_topics/
+03_journal/
+04_projects/
+05_archive/
+chat-record-backup/
+sparse_memory/
+templates/
+requirements.txt

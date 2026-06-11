@@ -1,0 +1,16 @@
+{
+  "name": "@ai-meditations/sandbox",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx src/index.test.ts"
+  },
+  "dependencies": {
+    "@ai-meditations/shared": "0.1.0"
+  }
+}
+

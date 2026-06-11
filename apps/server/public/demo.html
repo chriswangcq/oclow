@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Demo - AI Meditations</title>
+    <meta name="description" content="AI Meditations demo: a lightweight wiki for humans and an MCP workspace for agents." />
+    <link rel="stylesheet" href="/styles.css?v=20260501-i18n" />
+  </head>
+  <body class="public-page">
+    <header class="public-header">
+      <nav class="public-nav" aria-label="Public navigation">
+        <a class="public-brand" href="/about">
+          <span class="mark">M</span>
+          <span>AI Meditations</span>
+        </a>
+        <div class="public-nav-links">
+          <a href="/">Sign in</a>
+          <a href="/about">About</a>
+          <a href="/mcp-guide">MCP Guide</a>
+          <a href="/privacy">Privacy</a>
+          <a href="#zh">中文</a>
+        </div>
+      </nav>
+    </header>
+
+    <main class="public-main">
+      <section>
+        <p class="public-kicker">Demo workspace</p>
+        <h1>A lightweight wiki for humans, a durable workspace for agents</h1>
+        <p class="public-lede">
+          AI Meditations separates long-term knowledge into four stable layers: raw sources, compiled wiki,
+          operation journal, and user context. Humans get clean documents; agents get a governed MCP file workspace.
+        </p>
+        <div class="public-actions">
+          <a class="public-button" href="/">Open app</a>
+          <a class="public-button secondary" href="/mcp-guide">Connect MCP in 3 minutes</a>
+        </div>
+      </section>
+
+      <section class="wiki-flow" aria-label="LLM Wiki layers">
+        <div class="wiki-flow-item">
+          <strong>sources/</strong>
+          <span>Raw material, meeting notes, long chats, and external references.</span>
+        </div>
+        <div class="wiki-flow-item">
+          <strong>docs/</strong>
+          <span>Stable wiki pages, concepts, decisions, and compiled knowledge.</span>
+        </div>
+        <div class="wiki-flow-item">
+          <strong>journal/</strong>
+          <span>Ingests, queries, lint passes, document changes, and daily timelines.</span>
+        </div>
+        <div class="wiki-flow-item">
+          <strong>self/</strong>
+          <span>User-visible, durable preferences and working context.</span>
+        </div>
+      </section>
+
+      <section class="public-grid">
+        <article class="public-panel">
+          <p class="public-kicker">Agent ingest</p>
+          <h2>Preserve sources first, compile knowledge second</h2>
+          <p>
+            When an agent receives new material, it keeps the raw source in <code>sources/</code> first,
+            then promotes stable conclusions into <code>docs/</code>.
+          </p>
+          <pre><code>sources/2026/05/2026-05-01-llm-wiki.md
+docs/ai-meditations/product/README.md
+journal/2026/05/2026-05-01.md</code></pre>
+        </article>
+
+        <article class="public-panel">
+          <p class="public-kicker">Human reader</p>
+          <h2>Folders are documents</h2>
+          <p>
+            A directory is a document package. <code>README.md</code> is the body, sibling Markdown files are pages,
+            and child directories are child documents. It stays readable for people and editable by agents.
+          </p>
+          <pre><code>docs/ai-meditations/
+  README.md
+  product/
+    README.md
+  dev/
+    decisions/
+      README.md</code></pre>
+        </article>
+      </section>
+
+      <section class="public-section">
+        <p class="public-kicker">Why MCP</p>
+        <h2>Switch agents without losing context</h2>
+        <p>
+          The same workspace can be exposed to different agents. Each agent starts from <code>AGENTS.md</code>,
+          <code>ai-meditations://llms.txt</code>, and <code>ai-meditations://skills/wiki-maintenance</code>,
+          then writes under the same rules.
+        </p>
+        <table class="public-table">
+          <thead>
+            <tr>
+              <th>Plain folder</th>
+              <th>AI Meditations</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Files drift and agents do not know where to put things.</td>
+              <td>The top-level layers have meaning: sources, docs, journal, self.</td>
+            </tr>
+            <tr>
+              <td>Every agent re-learns your background from scratch.</td>
+              <td>Every agent begins with the same schema and LLM Wiki Map.</td>
+            </tr>
+            <tr>
+              <td>Raw notes, summaries, and logs get mixed together.</td>
+              <td>Raw sources and compiled knowledge stay separate.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="zh" class="public-card public-language-section" lang="zh-CN">
+        <p class="public-kicker">中文</p>
+        <h1>人的轻量 wiki，Agent 的长期工作区</h1>
+        <p class="public-lede">
+          AI 沉思录把长期知识拆成四个稳定层：原始资料、编译后的 wiki、操作时间线和用户上下文。
+          人看到的是清爽文档，Agent 看到的是一套有规则的 MCP 文件工作区。
+        </p>
+
+        <h2>文件夹即文档</h2>
+        <p>
+          一个目录就是一个文档包。<code>README.md</code> 是正文，同级 Markdown 是页面，子目录是子文档。
+          这样人能阅读，Agent 也能用普通文件操作维护。
+        </p>
+
+        <h2>换 Agent，不丢上下文</h2>
+        <p>
+          同一个工作区可以暴露给不同 Agent。每个 Agent 进入时先读取 <code>AGENTS.md</code>、
+          <code>ai-meditations://llms.txt</code> 和 <code>ai-meditations://skills/wiki-maintenance</code>，
+          再按同一套规则写入。
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

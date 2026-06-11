@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Meditations</title>
+    <link rel="stylesheet" href="/styles.css?v=20260501-i18n" />
+  </head>
+  <body>
+    <main id="login" class="login-view" hidden>
+      <form id="login-form" class="login-panel">
+        <div class="login-heading">
+          <div>
+            <p class="eyebrow">AI Meditations</p>
+            <h1 data-i18n="brand">AI Meditations</h1>
+          </div>
+          <button id="login-language" class="language-toggle ghost small" type="button" data-i18n-title="language.toggle" title="Switch language">
+            <span data-i18n="language.short">中文</span>
+          </button>
+        </div>
+        <a id="google-login" class="google-login" href="/auth/google/start" hidden>
+          <span class="google-mark">G</span>
+          <span data-i18n="login.google">Continue with Google</span>
+        </a>
+        <div id="login-divider" class="login-divider" hidden><span data-i18n="login.orPassword">Or use password</span></div>
+        <label>
+          <span>Email</span>
+          <input id="email" name="email" autocomplete="email" />
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="password" name="password" type="password" autocomplete="current-password" />
+        </label>
+        <button type="submit" data-i18n="login.submit">Sign in</button>
+        <p id="login-error" class="error"></p>
+        <nav class="login-links" aria-label="Public pages" data-i18n-aria-label="aria.publicPages">
+          <a href="/about" data-i18n="nav.about">About</a>
+          <a href="/demo">Demo</a>
+          <a href="/mcp-guide" data-i18n="nav.mcpGuide">MCP Guide</a>
+          <a href="/privacy" data-i18n="nav.privacy">Privacy</a>
+          <a href="/terms" data-i18n="nav.terms">Terms</a>
+        </nav>
+      </form>
+    </main>
+
+    <main id="app" class="app-shell" hidden>
+      <aside class="app-rail" aria-label="App navigation" data-i18n-aria-label="aria.appNavigation">
+        <div class="rail-head">
+          <div class="brand">
+            <span class="mark">M</span>
+            <div>
+              <strong data-i18n="brand">AI Meditations</strong>
+              <small id="user-email"></small>
+            </div>
+          </div>
+        </div>
+
+        <nav class="nav rail-nav" aria-label="Primary navigation" data-i18n-aria-label="aria.mainNavigation">
+          <button data-view="browse" data-root="docs" class="active" title="Documents" data-i18n-title="nav.docs">
+            <span class="rail-icon" aria-hidden="true" data-i18n="icon.docs">D</span>
+            <span class="rail-label" data-i18n="nav.docs">Docs</span>
+          </button>
+          <button data-view="timeline" title="Journal" data-i18n-title="nav.journal">
+            <span class="rail-icon" aria-hidden="true" data-i18n="icon.journal">J</span>
+            <span class="rail-label" data-i18n="nav.journal">Journal</span>
+          </button>
+        </nav>
+
+        <div class="rail-actions">
+          <button id="top-search" class="ghost" type="button" aria-expanded="false" aria-controls="search-overlay" title="Search" data-i18n-title="nav.search">
+            <span class="rail-icon search-mark" aria-hidden="true"></span>
+            <span class="rail-label" data-i18n="nav.search">Search</span>
+          </button>
+          <button id="top-audit" class="ghost" type="button" aria-expanded="false" aria-controls="audit-overlay" title="Activity log" data-i18n-title="nav.audit">
+            <span class="rail-icon" aria-hidden="true" data-i18n="icon.audit">L</span>
+            <span class="rail-label" data-i18n="nav.auditShort">Log</span>
+          </button>
+          <button id="top-safety" class="ghost" type="button" aria-expanded="false" aria-controls="safety-overlay" title="Data safety" data-i18n-title="nav.safety">
+            <span class="rail-icon" aria-hidden="true" data-i18n="icon.safety">S</span>
+            <span class="rail-label" data-i18n="nav.safetyShort">Safety</span>
+          </button>
+          <button id="top-agent" class="ghost" type="button" aria-expanded="false" aria-controls="agent-overlay" title="Connect Agent" data-i18n-title="nav.agent">
+            <span class="rail-icon" aria-hidden="true">M</span>
+            <span class="rail-label">Agent</span>
+          </button>
+        </div>
+
+        <div class="rail-footer">
+          <div class="menu-wrap">
+            <button id="top-more" class="ghost" type="button" aria-expanded="false" aria-controls="top-menu" title="More" data-i18n-title="nav.more">
+              <span class="rail-icon more-mark" aria-hidden="true"></span>
+              <span class="rail-label" data-i18n="nav.more">More</span>
+            </button>
+            <div id="top-menu" class="top-menu" role="menu" hidden>
+              <button id="menu-search" class="menu-mobile-action" type="button" role="menuitem" data-i18n="nav.search">Search</button>
+              <button id="menu-audit" class="menu-mobile-action" type="button" role="menuitem" data-i18n="nav.audit">Activity log</button>
+              <button id="menu-safety" class="menu-mobile-action" type="button" role="menuitem" data-i18n="nav.safety">Data safety</button>
+              <button id="menu-agent" class="menu-mobile-action" type="button" role="menuitem" data-i18n="nav.agent">Connect Agent</button>
+              <button id="menu-language" type="button" role="menuitem" data-i18n="language.action">中文</button>
+              <button id="menu-logout" type="button" role="menuitem" data-i18n="nav.logout">Sign out</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="main-pane">
+        <section id="browse-view" class="view">
+          <div class="browser">
+            <div id="browser-grid" class="side-layout browser-grid">
+              <section id="nav-panel" class="side-panel file-list-pane">
+                <nav id="panel-path" class="panel-path" aria-label="Current path" data-i18n-aria-label="aria.currentPath"></nav>
+                <section class="nav-module">
+                  <div class="module-head">
+                    <h3 data-i18n="sidebar.siblings">Sibling documents</h3>
+                    <span id="sibling-count" class="module-count">0</span>
+                  </div>
+                  <div id="sibling-list" class="file-list"></div>
+                </section>
+                <section id="page-module" class="nav-module">
+                  <div class="module-head">
+                    <h3 data-i18n="sidebar.pages">Pages in this document</h3>
+                    <span id="page-count" class="module-count">0</span>
+                  </div>
+                  <div id="page-list" class="file-list"></div>
+                </section>
+                <section id="child-document-module" class="nav-module">
+                  <div class="module-head">
+                    <h3 data-i18n="sidebar.children">Child documents</h3>
+                    <span id="subdoc-count" class="module-count">0</span>
+                  </div>
+                  <div id="file-list" class="file-list"></div>
+                </section>
+              </section>
+              <section class="content-pane preview-pane">
+                <div id="preview-empty" class="empty-preview">
+                  <h3 data-i18n="empty.selectDocument">Select a document</h3>
+                  <p data-i18n="empty.previewHint">Choose a document from the sidebar to read it.</p>
+                </div>
+                <div id="preview-doc" hidden>
+                  <div class="document-head">
+                    <span id="current-path-file" class="path-chip">index.md</span>
+                    <button id="copy-path" class="ghost small" data-i18n="action.copySourcePath">Copy source path</button>
+                  </div>
+                  <article id="file-preview" class="document-stack"></article>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section id="timeline-view" class="view" hidden>
+          <div id="timeline-layout" class="side-layout timeline-layout">
+            <aside id="timeline-panel" class="side-panel timeline-controls">
+              <section class="timeline-control-group">
+                <h3 data-i18n="timeline.type">Type</h3>
+                <div class="segmented vertical" id="timeline-type-filter">
+                  <button data-timeline-type="all" class="active" data-i18n="timeline.all">All</button>
+                  <button data-timeline-type="session" data-i18n="timeline.session">Session</button>
+                  <button data-timeline-type="change" data-i18n="timeline.change">Change</button>
+                  <button data-timeline-type="decision" data-i18n="timeline.decision">Decision</button>
+                  <button data-timeline-type="question" data-i18n="timeline.question">Question</button>
+                  <button data-timeline-type="pending" data-i18n="timeline.pending">Needs distillation</button>
+                </div>
+              </section>
+              <section class="timeline-control-group">
+                <h3 data-i18n="timeline.range">Range</h3>
+                <div class="segmented vertical" id="timeline-range-filter">
+                  <button data-timeline-range="7" class="active" data-i18n="timeline.range7">7 days</button>
+                  <button data-timeline-range="30" data-i18n="timeline.range30">30 days</button>
+                  <button data-timeline-range="all" data-i18n="timeline.all">All</button>
+                </div>
+              </section>
+            </aside>
+            <section class="content-pane timeline-content">
+              <div class="timeline-head">
+                <div>
+                  <h2 data-i18n="nav.journal">Journal</h2>
+                  <p id="timeline-summary" class="muted-copy"></p>
+                </div>
+                <button id="refresh-timeline" class="ghost small" data-i18n="action.refresh">Refresh</button>
+              </div>
+              <div id="timeline-list" class="timeline-list"></div>
+            </section>
+          </div>
+        </section>
+
+      </section>
+
+      <section id="search-overlay" class="search-overlay" hidden>
+        <div class="search-scrim" data-close-search></div>
+        <section class="search-palette" role="dialog" aria-modal="true" aria-labelledby="search-title">
+          <form id="search-form" class="search-palette-form">
+            <label class="search-palette-label" for="search-input">
+              <span id="search-title" data-i18n="search.title">Search</span>
+              <input id="search-input" placeholder="Search documents, journal, and content" data-i18n-placeholder="search.placeholder" autocomplete="off" />
+            </label>
+            <button id="close-search" class="ghost" type="button" data-close-search data-i18n="action.close">Close</button>
+          </form>
+          <div id="search-results" class="search-results" role="listbox" aria-label="Search results" data-i18n-aria-label="aria.searchResults"></div>
+        </section>
+      </section>
+
+      <section id="agent-overlay" class="overlay agent-overlay" hidden>
+        <div class="overlay-scrim" data-close-agent></div>
+        <section class="agent-palette" role="dialog" aria-modal="true" aria-labelledby="agent-title">
+          <div class="agent-palette-head">
+            <div>
+              <p class="eyebrow">MCP</p>
+              <h3 id="agent-title" data-i18n="agent.title">Connect Agent</h3>
+            </div>
+            <div class="agent-palette-actions">
+              <button id="refresh-mcp" class="ghost small" type="button" data-i18n="action.refresh">Refresh</button>
+              <button id="close-agent" class="ghost small" type="button" data-close-agent data-i18n="action.close">Close</button>
+            </div>
+          </div>
+          <div class="agent-palette-body">
+            <p class="muted-copy" data-i18n="agent.intro">Connect AI Meditations to an MCP-capable client so agents can read and update your workspace through the file sandbox rules.</p>
+
+            <div class="mcp-choice">
+              <strong data-i18n="agent.chooseTitle">Start with what your client supports</strong>
+              <span data-i18n="agent.chooseCopy">Use automatic OAuth when the client has an OAuth, authorization, or connect flow. Use manual JSON only when that is all the client supports.</span>
+            </div>
+
+            <section class="mcp-method primary">
+              <div class="mcp-method-copy">
+                <p class="eyebrow" data-i18n="agent.recommended">Recommended</p>
+                <h4 data-i18n="agent.oauthTitle">Automatic OAuth</h4>
+                <p class="muted-copy" data-i18n="agent.oauthCopy">Copy this address into your client's MCP Server URL field. The client will open a browser; sign in and approve access.</p>
+              </div>
+              <div class="mcp-copy-line">
+                <code id="mcp-oauth-url">-</code>
+                <button id="copy-oauth-url" type="button" data-i18n="action.copyUrl">Copy URL</button>
+              </div>
+              <ol class="mcp-steps">
+                <li data-i18n="agent.oauthStep1">Choose OAuth or Remote MCP in your client.</li>
+                <li data-i18n="agent.oauthStep2">Paste the MCP Server URL above.</li>
+                <li data-i18n="agent.oauthStep3">Follow the prompt to sign in and approve access.</li>
+              </ol>
+            </section>
+
+            <section class="mcp-method">
+              <div class="mcp-method-copy">
+                <p class="eyebrow" data-i18n="agent.fallback">Fallback</p>
+                <h4 data-i18n="agent.manualTitle">Manual configuration</h4>
+                <p class="muted-copy" data-i18n="agent.manualCopy">If your client does not support OAuth, copy the full JSON config. It contains a Bearer key for this account, so only use it with clients you trust.</p>
+              </div>
+              <div class="mcp-actions">
+                <button id="copy-mcp" type="button" data-i18n="action.copyJson">Copy JSON config</button>
+                <button id="toggle-mcp-config" class="ghost" type="button" aria-expanded="false" data-i18n="action.showConfig">Show config</button>
+              </div>
+              <div id="mcp-config-panel" hidden>
+                <pre id="mcp-config" class="code-block"></pre>
+              </div>
+            </section>
+
+            <details class="mcp-advanced">
+              <summary data-i18n="agent.advanced">Advanced information</summary>
+              <dl>
+                <div>
+                  <dt>OAuth Discovery</dt>
+                  <dd id="mcp-oauth-discovery">-</dd>
+                </div>
+                <div>
+                  <dt data-i18n="agent.scope">Scope</dt>
+                  <dd data-i18n="agent.scopeCurrent">Current signed-in user's workspace</dd>
+                </div>
+              </dl>
+            </details>
+          </div>
+        </section>
+      </section>
+
+      <section id="audit-overlay" class="overlay audit-overlay" hidden>
+        <div class="overlay-scrim" data-close-audit></div>
+        <section class="audit-palette" role="dialog" aria-modal="true" aria-labelledby="audit-title">
+          <div class="audit-palette-head">
+            <div>
+              <p class="eyebrow">Audit</p>
+              <h3 id="audit-title" data-i18n="audit.title">Activity log</h3>
+            </div>
+            <div class="audit-palette-actions">
+              <button id="refresh-audit" class="ghost small" type="button" data-i18n="action.refresh">Refresh</button>
+              <button id="close-audit" class="ghost small" type="button" data-close-audit data-i18n="action.close">Close</button>
+            </div>
+          </div>
+          <div class="audit-palette-body">
+            <div id="audit-list" class="list"></div>
+          </div>
+        </section>
+      </section>
+
+      <section id="safety-overlay" class="overlay safety-overlay" hidden>
+        <div class="overlay-scrim" data-close-safety></div>
+        <section class="safety-palette" role="dialog" aria-modal="true" aria-labelledby="safety-title">
+          <div class="safety-palette-head">
+            <div>
+              <p class="eyebrow">Safety</p>
+              <h3 id="safety-title" data-i18n="safety.title">Data safety</h3>
+            </div>
+            <div class="safety-palette-actions">
+              <button id="refresh-backups" class="ghost small" type="button" data-i18n="action.refresh">Refresh</button>
+              <button id="close-safety" class="ghost small" type="button" data-close-safety data-i18n="action.close">Close</button>
+            </div>
+          </div>
+          <div class="safety-palette-body">
+            <p class="muted-copy" data-i18n="safety.intro">Export the current workspace, or keep a downloadable backup on the server.</p>
+            <div class="safety-actions">
+              <button id="download-export" type="button" data-i18n="safety.download">Download workspace</button>
+              <button id="create-backup" class="ghost" type="button" data-i18n="safety.createBackup">Create local backup</button>
+            </div>
+            <div class="panel-head compact">
+              <h3 data-i18n="safety.localBackups">Local backups</h3>
+              <span id="backup-retention" class="path-chip">-</span>
+            </div>
+            <div id="backup-list" class="list"></div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js?v=20260501-i18n" type="module"></script>
+  </body>
+</html>

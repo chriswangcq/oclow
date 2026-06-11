@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Connect MCP in 3 minutes - AI Meditations</title>
+    <meta name="description" content="AI Meditations MCP setup guide for OAuth and Bearer Key access." />
+    <link rel="stylesheet" href="/styles.css?v=20260501-i18n" />
+  </head>
+  <body class="public-page">
+    <header class="public-header">
+      <nav class="public-nav" aria-label="Public navigation">
+        <a class="public-brand" href="/about">
+          <span class="mark">M</span>
+          <span>AI Meditations</span>
+        </a>
+        <div class="public-nav-links">
+          <a href="/">Sign in</a>
+          <a href="/demo">Demo</a>
+          <a href="/about">About</a>
+          <a href="/privacy">Privacy</a>
+          <a href="#zh">中文</a>
+        </div>
+      </nav>
+    </header>
+
+    <main class="public-main">
+      <section>
+        <p class="public-kicker">Remote MCP</p>
+        <h1>Connect AI Meditations MCP in 3 minutes</h1>
+        <p class="public-lede">
+          AI Meditations supports both OAuth and Bearer Key access. Prefer OAuth when your client supports MCP OAuth;
+          use Bearer configuration only for clients that do not yet support OAuth.
+        </p>
+      </section>
+
+      <section class="guide-steps">
+        <article class="guide-step">
+          <h2>Open the app and sign in</h2>
+          <p>
+            Go to <a href="/">AI Meditations</a> and sign in with Google. After sign-in, open
+            <strong>Agent / MCP Guide</strong> from the app menu.
+          </p>
+        </article>
+
+        <article class="guide-step">
+          <h2>Copy the MCP Server URL</h2>
+          <p>The server URL is:</p>
+          <pre><code>https://api.oclow.ai/mcp</code></pre>
+          <p>If your client supports OAuth, paste this URL and choose OAuth authorization.</p>
+        </article>
+
+        <article class="guide-step">
+          <h2>Use a Bearer Key only when OAuth is unavailable</h2>
+          <p>Copy the Bearer configuration from the app. It looks like this:</p>
+          <pre><code>{
+  "mcpServers": {
+    "ai-meditations": {
+      "url": "https://api.oclow.ai/mcp",
+      "headers": {
+        "Authorization": "Bearer &lt;your-token&gt;"
+      }
+    }
+  }
+}</code></pre>
+          <p>A Bearer Key is equivalent to a workspace access token. Put it only into clients you trust.</p>
+        </article>
+
+        <article class="guide-step">
+          <h2>Ask the agent to read the workspace map first</h2>
+          <p>After connecting, test with:</p>
+          <pre><code>Please read AI Meditations get_workspace_info, then run help wiki.
+Tell me what sources/docs/journal/self mean in this workspace.</code></pre>
+          <p>A healthy connection exposes two tools: <code>get_workspace_info</code> and <code>run_shell</code>.</p>
+        </article>
+      </section>
+
+      <section class="public-section">
+        <p class="public-kicker">What the agent sees</p>
+        <h2>MCP exposes a governed file workspace, not a product API</h2>
+        <table class="public-table">
+          <thead>
+            <tr>
+              <th>Tool or resource</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>get_workspace_info</code></td>
+              <td>Returns the LLM Wiki Map: layers, writing rules, and first commands.</td>
+            </tr>
+            <tr>
+              <td><code>run_shell</code></td>
+              <td>Runs limited file commands such as <code>cat</code>, <code>tree</code>, <code>rg</code>, <code>append</code>, and <code>patch</code>.</td>
+            </tr>
+            <tr>
+              <td><code>ai-meditations://llms.txt</code></td>
+              <td>The shortest LLM entrypoint.</td>
+            </tr>
+            <tr>
+              <td><code>ai-meditations://skills/wiki-maintenance</code></td>
+              <td>Explains how agents should ingest, query, and lint this LLM Wiki.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="zh" class="public-card public-language-section" lang="zh-CN">
+        <p class="public-kicker">中文</p>
+        <h1>3 分钟接入 AI 沉思录 MCP</h1>
+        <p class="public-lede">
+          支持 OAuth 和 Bearer Key 两种接入方式。支持 MCP OAuth 的客户端优先使用 OAuth；
+          暂不支持 OAuth 的客户端可以复制 Bearer 配置。
+        </p>
+
+        <h2>打开应用并登录</h2>
+        <p>
+          进入 <a href="/">AI 沉思录</a>，使用 Google 登录。登录后打开应用里的
+          <strong>Agent / MCP 接入</strong> 页面。
+        </p>
+
+        <h2>复制 MCP Server URL</h2>
+        <p>服务器地址固定为：</p>
+        <pre><code>https://api.oclow.ai/mcp</code></pre>
+        <p>如果客户端支持 OAuth，只需要填写这个 URL，并选择 OAuth 授权。</p>
+
+        <h2>不支持 OAuth 时使用 Bearer Key</h2>
+        <p>Bearer Key 等同于工作区访问令牌，只放进你信任的客户端。</p>
+
+        <h2>让 Agent 先读工作区地图</h2>
+        <pre><code>请读取 AI 沉思录的 get_workspace_info，然后运行 help wiki，
+告诉我这个工作区的 sources/docs/journal/self 分别是什么。</code></pre>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>About AI Meditations</title>
+    <meta
+      name="description"
+      content="AI Meditations is a private Markdown knowledge workspace for humans to read and agents to maintain through MCP."
+    />
+    <link rel="stylesheet" href="/styles.css?v=20260501-i18n" />
+  </head>
+  <body class="public-page">
+    <header class="public-header">
+      <nav class="public-nav" aria-label="Public navigation">
+        <a class="public-brand" href="/about">
+          <span class="mark">M</span>
+          <span>AI Meditations</span>
+        </a>
+        <div class="public-nav-links">
+          <a href="/">Sign in</a>
+          <a href="/demo">Demo</a>
+          <a href="/mcp-guide">MCP Guide</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="#zh">中文</a>
+        </div>
+      </nav>
+    </header>
+
+    <main class="public-main">
+      <section class="public-card">
+        <h1>AI Meditations</h1>
+        <p class="public-lede">
+          AI Meditations is a private Markdown knowledge workspace. Humans read it like a lightweight wiki;
+          agents access the same files through MCP and help compile raw material into a stable, traceable LLM Wiki.
+        </p>
+
+        <h2>What it does</h2>
+        <ul>
+          <li><code>sources/</code> keeps raw material and provenance.</li>
+          <li><code>docs/</code> keeps compiled long-term knowledge.</li>
+          <li><code>journal/</code> keeps sessions, changes, and daily timelines.</li>
+          <li><code>self/</code> keeps user-visible, durable agent context.</li>
+        </ul>
+
+        <h2>How Google sign-in is used</h2>
+        <p>
+          Google sign-in is used only to identify your account, create a session, and isolate your private workspace.
+          AI Meditations requests only basic profile information: Google account ID, email, name, and avatar when provided.
+          It does not request Gmail, Google Drive, Google Calendar, contacts, or other Google product data.
+        </p>
+
+        <h2>Agent access</h2>
+        <p>
+          AI Meditations provides Remote MCP access. After you authorize a client, an agent can read and write Markdown
+          files inside your own workspace under explicit file sandbox rules. Your workspace remains private to your account.
+        </p>
+
+        <p class="public-note">Contact: <a href="mailto:alpcppaul@gmail.com">alpcppaul@gmail.com</a></p>
+      </section>
+
+      <section id="zh" class="public-card public-language-section" lang="zh-CN">
+        <p class="public-kicker">中文</p>
+        <h1>AI 沉思录</h1>
+        <p class="public-lede">
+          AI 沉思录是一个私有 Markdown 知识工作区。人可以像阅读轻量 wiki 一样查看长期知识；
+          Agent 可以通过 MCP 读写同一套文件，把原始资料编译成稳定、可追溯的 LLM Wiki。
+        </p>
+
+        <h2>它做什么</h2>
+        <ul>
+          <li>用 <code>sources/</code> 保存原始资料和来源。</li>
+          <li>用 <code>docs/</code> 保存编译后的长期知识。</li>
+          <li>用 <code>journal/</code> 记录会话、变更和每日时间线。</li>
+          <li>用 <code>self/</code> 保存用户可见、长期稳定的 Agent 上下文。</li>
+        </ul>
+
+        <h2>Google 登录的用途</h2>
+        <p>
+          Google 登录只用于识别账号、创建会话和隔离用户工作区。AI 沉思录只请求基础登录信息：
+          Google 账号 ID、邮箱、姓名和头像。应用不会请求 Gmail、Google Drive、Google Calendar 或其他 Google 产品数据。
+        </p>
+
+        <h2>Agent 接入</h2>
+        <p>
+          AI 沉思录提供 Remote MCP 接入。用户授权后，Agent 可以在用户自己的工作区中按规则读取和写入 Markdown
+          文件。所有数据仍属于用户的私有工作区。
+        </p>
+
+        <p class="public-note">联系邮箱：<a href="mailto:alpcppaul@gmail.com">alpcppaul@gmail.com</a></p>
+      </section>
+    </main>
+  </body>
+</html>

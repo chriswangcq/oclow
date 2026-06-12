@@ -1315,8 +1315,7 @@ textarea {
   background: var(--accent-soft);
 }
 
-.sibling-row.active .file-icon,
-.page-row.active .file-icon {
+.sibling-row.active .file-icon {
   border-color: #9fcbc5;
   background: #e7f5f1;
   color: var(--accent-strong);
@@ -1408,37 +1407,8 @@ textarea {
   color: #22303a;
 }
 
-.page-section {
+.document-section {
   scroll-margin-top: 92px;
-}
-
-.page-section + .page-section {
-  border-top: 1px solid var(--line);
-}
-
-.page-divider {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 12px 32px 0;
-  background: var(--surface);
-}
-
-.page-divider span {
-  display: inline-flex;
-  max-width: 100%;
-  min-height: 26px;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0 9px;
-  background: var(--surface-soft);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .list-row {

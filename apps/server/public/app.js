@@ -4,7 +4,6 @@ const state = {
   view: "browse",
   currentDir: ".",
   currentMainPath: "",
-  selectedPath: "",
   language: initialLanguage(),
   mcpConfig: null,
   authProviders: null,
@@ -75,29 +74,21 @@ const I18N = {
     "empty.previewHint": "Choose a document from the sidebar to read it.",
     "empty.noSiblings": "No sibling documents.",
     "empty.noChildren": "No child documents.",
-    "empty.noPages": "No pages.",
     "empty.noJournal": "No journal records match the current filters.",
     "empty.noSearch": "No matching content found.",
     "empty.searchStart": "Type a keyword to start searching.",
     "empty.searching": "Searching.",
     "empty.searchFailed": "Search failed.",
     "empty.loadingTitle": "Opening document",
-    "empty.loadingCopy": "Markdown pages in the same document will be shown in order below.",
+    "empty.loadingCopy": "The document body and child documents will appear below.",
     "empty.noAudit": "No activity yet.",
     "empty.noBackups": "No local backups yet.",
     "sidebar.siblings": "Sibling documents",
-    "sidebar.pages": "Pages in this document",
     "sidebar.children": "Child documents",
     "file.currentDocument": "Current document",
     "file.documentPackage": "Document package",
-    "file.mainPage": "Main page",
     "file.same": "Peer",
     "file.child": "Child",
-    "file.mainIcon": "Main",
-    "file.pageIcon": "Page",
-    "meta.noPages": "No pages",
-    "meta.pageOne": "{count} page",
-    "meta.pageMany": "{count} pages",
     "meta.childOne": "{count} child document",
     "meta.childMany": "{count} child documents",
     "timeline.type": "Type",
@@ -193,32 +184,24 @@ const I18N = {
     "root.workspace": "工作区",
     "empty.selectDocument": "选择一个文档",
     "empty.selectJournal": "选择一条记录",
-    "empty.previewHint": "点击左侧页面树中的文档进行阅读。",
+    "empty.previewHint": "点击左侧文档树中的文档进行阅读。",
     "empty.noSiblings": "暂无同级文档。",
     "empty.noChildren": "暂无子文档。",
-    "empty.noPages": "暂无页面。",
     "empty.noJournal": "当前筛选下暂无日记记录。",
     "empty.noSearch": "没有找到匹配内容。",
     "empty.searchStart": "输入关键词开始搜索。",
     "empty.searching": "搜索中。",
     "empty.searchFailed": "搜索失败。",
     "empty.loadingTitle": "正在展开文档",
-    "empty.loadingCopy": "同一文档中的 Markdown 会按顺序排列在下方。",
+    "empty.loadingCopy": "文档正文和子文档会显示在下方。",
     "empty.noAudit": "暂无日志。",
     "empty.noBackups": "暂无本地备份。",
     "sidebar.siblings": "同级文档",
-    "sidebar.pages": "本文档子页面",
     "sidebar.children": "本文档子文档",
     "file.currentDocument": "当前文档",
     "file.documentPackage": "文档包",
-    "file.mainPage": "主页面",
     "file.same": "同",
     "file.child": "子",
-    "file.mainIcon": "主",
-    "file.pageIcon": "页",
-    "meta.noPages": "暂无页面",
-    "meta.pageOne": "{count} 页",
-    "meta.pageMany": "{count} 页",
     "meta.childOne": "{count} 个子文档",
     "meta.childMany": "{count} 个子文档",
     "timeline.type": "类型",
@@ -355,10 +338,6 @@ function updateDocumentTitle() {
   document.title = state.view === "browse" ? t("brand") : `${t("brand")} · ${t(VIEW_LABELS[state.view] ?? "nav.docs")}`;
 }
 
-function pageCountLabel(count) {
-  return t(count === 1 ? "meta.pageOne" : "meta.pageMany", { count });
-}
-
 function childCountLabel(count) {
   return t(count === 1 ? "meta.childOne" : "meta.childMany", { count });
 }
@@ -489,8 +468,7 @@ function bindEvents() {
   });
 
   $("#copy-path").addEventListener("click", async () => {
-    const sourcePath = state.currentMainPath || state.selectedPath;
-    if (sourcePath) await navigator.clipboard.writeText(sourcePath);
+    if (state.currentMainPath) await navigator.clipboard.writeText(state.currentMainPath);
   });
 
   $("#search-form").addEventListener("submit", async (event) => {
@@ -746,11 +724,10 @@ async function loadDirectory(path = ".") {
 
 function renderLoadedDocumentPackage(data, loadId = state.loadId) {
   const path = data.path ?? state.currentDir;
-  const entries = data.entries ?? [];
   state.currentDir = path;
   renderPanelPath(path);
-  renderSidebarNavigation(path, data.siblingDocuments ?? [], data.pages ?? [], data.childDocuments ?? []);
-  openDocumentPackage(path, entries, data.childDocuments ?? [], data.pages ?? [], loadId);
+  renderSidebarNavigation(path, data.siblingDocuments ?? [], data.childDocuments ?? []);
+  openDocumentPackage(path, data.childDocuments ?? [], data.body ?? null, loadId);
 }
 
 function renderPanelPath(path) {
@@ -807,9 +784,8 @@ function compactCrumbs(crumbs) {
   return [crumbs[0], { ellipsis: true }, ...crumbs.slice(-2)];
 }
 
-function renderSidebarNavigation(currentPath, siblingDocuments, pages, childDocuments) {
+function renderSidebarNavigation(currentPath, siblingDocuments, childDocuments) {
   renderSiblingDocumentList(siblingDocuments, currentPath);
-  renderPageList(pages);
   renderChildDocumentList(childDocuments);
 }
 
@@ -870,37 +846,6 @@ function renderChildDocumentList(childDocuments) {
   }
 }
 
-function renderPageList(pages) {
-  const container = $("#page-list");
-  container.innerHTML = "";
-  $("#page-count").textContent = String(Math.max(0, pages.length));
-
-  if (!pages.length) {
-    renderEmptyList(container, t("empty.noPages"));
-    return;
-  }
-
-  for (const page of pages) {
-    const row = document.createElement("button");
-    row.className = "file-row page-row";
-    row.dataset.kind = "page";
-    row.dataset.path = page.sourcePath;
-    const pageName = page.pageNumber === 1 ? t("file.mainPage") : displayPageName(page);
-    row.title = `${pageName} · ${sourceFileName(page.sourcePath)}`;
-    row.innerHTML = `
-      <span class="file-icon" aria-hidden="true">${escapeHtml(page.pageNumber === 1 ? t("file.mainIcon") : t("file.pageIcon"))}</span>
-      <span class="file-name">${escapeHtml(pageName)}</span>
-      <span class="file-meta">${escapeHtml(sourceFileName(page.sourcePath))}</span>
-    `;
-    row.addEventListener("click", () => {
-      if (!scrollToPage(page.sourcePath)) {
-        openFile(page.sourcePath, { displayPath: page.displayPath });
-      }
-    });
-    container.append(row);
-  }
-}
-
 function renderEmptyList(container, message) {
   const empty = document.createElement("div");
   empty.className = "empty-folder compact";
@@ -909,16 +854,11 @@ function renderEmptyList(container, message) {
 }
 
 function documentCardMeta(document) {
-  const stats = [
-    document.pageCount ? pageCountLabel(document.pageCount) : t("meta.noPages"),
-    document.childCount ? childCountLabel(document.childCount) : ""
-  ].filter(Boolean).join(" · ");
-  return stats || t("file.documentPackage");
+  return document.childCount ? childCountLabel(document.childCount) : t("file.documentPackage");
 }
 
 function showLoadingPreview(path) {
   state.currentMainPath = "";
-  state.selectedPath = "";
   filePreview.innerHTML = "";
   setSourceChip(path);
   $("#preview-empty").hidden = false;
@@ -928,11 +868,10 @@ function showLoadingPreview(path) {
   empty.querySelector("p").textContent = t("empty.loadingCopy");
 }
 
-function openDocumentPackage(path, entries, childDocuments = [], pages = [], loadId = state.loadId) {
+function openDocumentPackage(path, childDocuments = [], body = null, loadId = state.loadId) {
   if (loadId !== state.loadId) return;
-  if (!pages.length && !childDocuments.length) {
+  if (!body && !childDocuments.length) {
     state.currentMainPath = "";
-    state.selectedPath = "";
     filePreview.innerHTML = "";
     $("#preview-empty").hidden = false;
     $("#preview-doc").hidden = true;
@@ -941,16 +880,10 @@ function openDocumentPackage(path, entries, childDocuments = [], pages = [], loa
     return;
   }
 
-  filePreview.innerHTML = `${pages.map(renderPageSection).join("")}${renderChildDocumentSection(childDocuments)}`;
+  filePreview.innerHTML = `${body ? renderDocumentBody(body) : ""}${renderChildDocumentSection(childDocuments)}`;
   bindChildDocumentCards();
-  state.currentMainPath = pages[0]?.sourcePath ?? path;
+  state.currentMainPath = body?.sourcePath ?? "";
   setSourceChip(state.currentMainPath);
-  if (pages[0]) {
-    selectPage(pages[0].sourcePath);
-  } else {
-    state.selectedPath = path;
-    updateSelectedRow();
-  }
   $("#preview-empty").hidden = true;
   $("#preview-doc").hidden = false;
   setView("browse");
@@ -960,19 +893,16 @@ async function openFile(path, options = {}) {
   const loadId = ++state.loadId;
   const data = await api(`/api/files/render?path=${encodeURIComponent(path)}`);
   if (loadId !== state.loadId) return;
-  filePreview.innerHTML = renderPageSection({
+  filePreview.innerHTML = renderDocumentBody({
     sourcePath: path,
-    displayPath: options.displayPath ?? pageDisplayPath(path),
-    html: data.html,
-    depth: 0,
-    pageNumber: 1
+    displayPath: options.displayPath ?? documentDisplayPath(path),
+    html: data.html
   });
   state.currentMainPath = path;
   setSourceChip(state.currentMainPath);
-  selectPage(path);
   $("#preview-empty").hidden = true;
   $("#preview-doc").hidden = false;
-  renderPageList([]);
+  renderChildDocumentList([]);
   setView("browse");
 }
 
@@ -1181,10 +1111,7 @@ function renderChildDocumentCard(document) {
     .slice(0, 5)
     .map((tag) => `<span class="child-document-tag">${escapeHtml(tag)}</span>`)
     .join("");
-  const stats = [
-    document.pageCount ? pageCountLabel(document.pageCount) : t("meta.noPages"),
-    document.childCount ? childCountLabel(document.childCount) : ""
-  ].filter(Boolean).join(" · ");
+  const stats = document.childCount ? childCountLabel(document.childCount) : "";
   const updated = document.updatedAt ? new Date(document.updatedAt).toLocaleDateString(currentLocale()) : "";
   return `
     <button class="child-document-card" type="button" data-open-child-document="${escapeHtml(document.path)}">
@@ -1322,11 +1249,6 @@ async function api(path, options = {}) {
   return data;
 }
 
-function displayPageName(page) {
-  const name = sourceFileName(page.sourcePath).replace(/\.md$/i, "");
-  return name || page.displayPath;
-}
-
 function sourceFileName(path) {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
@@ -1338,9 +1260,7 @@ async function openDocumentTarget(path) {
       return;
     }
 
-    const parent = dirname(path);
-    await loadDirectory(parent);
-    if (!scrollToPage(path)) await openFile(path);
+    await openFile(path);
     return;
   }
 
@@ -1362,31 +1282,12 @@ function isReadmePath(path) {
   return lower === "readme.md" || lower.endsWith("/readme.md");
 }
 
-function renderPageSection(page) {
-  const isFirst = page.pageNumber === 1;
+function renderDocumentBody(body) {
   return `
-    <section id="${pageSectionId(page.sourcePath)}" class="page-section" data-depth="${Math.min(page.depth, 4)}" data-source-path="${escapeHtml(page.sourcePath)}">
-      ${isFirst ? "" : `<div class="page-divider"><span>${escapeHtml(page.displayPath)}</span></div>`}
-      <div class="markdown">${page.html}</div>
+    <section class="document-section" data-source-path="${escapeHtml(body.sourcePath)}">
+      <div class="markdown">${body.html}</div>
     </section>
   `;
-}
-
-function pageSectionId(path) {
-  return `page-${path.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
-}
-
-function scrollToPage(path) {
-  const target = document.getElementById(pageSectionId(path));
-  if (!target) return false;
-  selectPage(path);
-  scrollPageIntoView(target);
-  return true;
-}
-
-function selectPage(path) {
-  state.selectedPath = path;
-  updateSelectedRow();
 }
 
 function setSourceChip(path) {
@@ -1395,20 +1296,7 @@ function setSourceChip(path) {
   chip.title = path || "";
 }
 
-function scrollPageIntoView(target) {
-  const preview = $(".preview-pane");
-  const previewRect = preview.getBoundingClientRect();
-  const targetRect = target.getBoundingClientRect();
-  if (preview.scrollHeight > preview.clientHeight) {
-    preview.scrollTo({
-      top: preview.scrollTop + targetRect.top - previewRect.top,
-      behavior: "auto"
-    });
-  }
-  target.scrollIntoView({ block: "start", behavior: "auto" });
-}
-
-function pageDisplayPath(path) {
+function documentDisplayPath(path) {
   if (!path || path === ".") return t("root.workspace");
   const pathWithoutExtension = path.toLowerCase().endsWith("/readme.md")
     ? path.slice(0, -"/README.md".length)
@@ -1429,12 +1317,6 @@ function rootSegment(path) {
 
 function currentRootConfig() {
   return ROOTS[rootSegment(state.currentDir)] ?? ROOTS.docs;
-}
-
-function updateSelectedRow() {
-  document.querySelectorAll(".page-row").forEach((row) => {
-    row.classList.toggle("active", row.dataset.path === state.selectedPath);
-  });
 }
 
 function formatBytes(bytes) {

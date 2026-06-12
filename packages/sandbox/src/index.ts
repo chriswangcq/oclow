@@ -53,13 +53,6 @@ type MarkdownMetadata = {
   firstParagraph?: string;
 };
 
-type DocumentInspectionPage = {
-  role: "main" | "page";
-  path: string;
-  title: string;
-  headings: number;
-};
-
 type DocumentInspectionChild = {
   path: string;
   readmePath?: string;
@@ -71,7 +64,7 @@ type DocumentInspectionChild = {
 };
 
 type DocumentInspection = {
-  kind: "document-package" | "same-document-page" | "file";
+  kind: "document-package" | "file";
   path: string;
   readmePath?: string;
   currentFile?: string;
@@ -79,7 +72,6 @@ type DocumentInspection = {
   summary?: string;
   status?: string;
   tags?: string[];
-  pages?: DocumentInspectionPage[];
   childDocuments?: DocumentInspectionChild[];
   warnings: string[];
   suggestions: string[];
@@ -118,7 +110,6 @@ const DEFAULT_OUTPUT_LIMIT = 64 * 1024;
 const DEFAULT_READ_LIMIT = 256 * 1024;
 const DEFAULT_WRITE_LIMIT = 128 * 1024;
 const DEFAULT_TREE_DEPTH = 4;
-const DOCUMENT_PAGE_COUNT_WARNING_THRESHOLD = 12;
 const PAGE_HEADING_COUNT_WARNING_THRESHOLD = 24;
 const WORKSPACE_HEALTH_DEFAULT_MARKDOWN_LIMIT = 80;
 const WORKSPACE_HEALTH_MAX_MARKDOWN_LIMIT = 300;
@@ -503,8 +494,8 @@ export class WorkspaceSandbox {
         [
           "diff requires another file or heredoc content.",
           "Examples:",
-          "diff docs/page.md docs/page-copy.md",
-          "diff docs/page.md <<EOF",
+          "diff docs/sub_docs/example/README.md docs/sub_docs/example-copy/README.md",
+          "diff docs/sub_docs/example/README.md <<EOF",
           "proposed full file content",
           "EOF"
         ].join("\n")
@@ -555,15 +546,27 @@ export class WorkspaceSandbox {
     }
 
     const parentPath = toVirtualPath(path.posix.dirname(virtualPath));
-    const parent = await this.resolvePath(parentPath, cwd);
-    const packageKind = path.posix.basename(virtualPath) === "README.md" ? "document-package" : "same-document-page";
-    const info = await this.describeDocumentPackage(parent.virtualPath, parent.abs, packageKind);
-    info.currentFile = virtualPath;
-    if (packageKind === "same-document-page") {
-      info.warnings.push("input is a same-document page, not a child document; inspect the parent package before adding new files");
-      info.recommendedCommands.unshift(`toc ${virtualPath}`, `section ${virtualPath} "## Heading"`);
+    if (path.posix.basename(virtualPath) === "README.md") {
+      const parent = await this.resolvePath(parentPath, cwd);
+      const info = await this.describeDocumentPackage(parent.virtualPath, parent.abs, "document-package");
+      info.currentFile = virtualPath;
+      return info;
     }
-    return info;
+
+    const warnings = isDocsTreePath(virtualPath)
+      ? ["stale sibling Markdown file; Reader uses only README.md as the document body"]
+      : [];
+    const suggestions = isDocsTreePath(virtualPath)
+      ? [`Move durable content to ${siblingMarkdownMoveTarget(parentPath, path.posix.basename(virtualPath))} or merge it into ${parentPath}/README.md.`]
+      : [];
+    return {
+      kind: "file",
+      path: virtualPath,
+      currentFile: virtualPath,
+      warnings,
+      suggestions,
+      recommendedCommands: [`cat ${virtualPath}`, `toc ${virtualPath}`, `section ${virtualPath} "## Heading"`]
+    };
   }
 
   private async describeDocumentPackage(virtualPath: string, abs: string, kind: DocumentInspection["kind"]): Promise<DocumentInspection> {
@@ -572,44 +575,21 @@ export class WorkspaceSandbox {
     const readmePath = readmeEntry ? toVirtualPath(path.posix.join(virtualPath, "README.md")) : undefined;
     const readmeAbs = readmeEntry ? path.join(abs, "README.md") : undefined;
     const metadata = readmeAbs ? await readMarkdownMetadata(readmeAbs, this.options.readLimitBytes) : undefined;
-    const pages: DocumentInspectionPage[] = [];
     const childDocuments: DocumentInspectionChild[] = [];
     const warnings: string[] = [];
     const suggestions: string[] = [];
 
-    if (readmePath) {
-      pages.push({
-        role: "main",
-        path: readmePath,
-        title: metadata?.title ?? "README",
-        headings: metadata?.headings ?? 0
-      });
-    } else {
+    if (!readmePath) {
       warnings.push("document package is missing README.md; Reader has no main body for this directory");
-      suggestions.push(`Create ${toVirtualPath(path.posix.join(virtualPath, "README.md"))} before adding sibling pages or child documents.`);
+      suggestions.push(`Create ${toVirtualPath(path.posix.join(virtualPath, "README.md"))} before adding child documents.`);
     }
 
     const markdownPages = entries
       .filter((entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== "README.md")
       .sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of markdownPages) {
-      const pagePath = toVirtualPath(path.posix.join(virtualPath, entry.name));
-      const pageMeta = await readMarkdownMetadata(path.join(abs, entry.name), this.options.readLimitBytes);
-      pages.push({
-        role: "page",
-        path: pagePath,
-        title: pageMeta.title ?? entry.name.replace(/\.md$/, ""),
-        headings: pageMeta.headings
-      });
-      if (pageMeta.headings >= PAGE_HEADING_COUNT_WARNING_THRESHOLD) {
-        suggestions.push(`${pagePath} has ${pageMeta.headings} headings; consider splitting stable subtopics into child documents.`);
-      }
-    }
-
-    if (markdownPages.length >= DOCUMENT_PAGE_COUNT_WARNING_THRESHOLD) {
-      suggestions.push(
-        `This package has ${markdownPages.length} same-document pages; consider moving durable subtopics into child document packages.`
-      );
+    if (markdownPages.length) {
+      warnings.push(`document package has stale sibling Markdown files: ${markdownPages.map((entry) => entry.name).join(", ")}`);
+      suggestions.push(...markdownPages.map((entry) => `Move ${toVirtualPath(path.posix.join(virtualPath, entry.name))} to ${siblingMarkdownMoveTarget(virtualPath, entry.name)} or merge it into ${readmePath ?? `${virtualPath}/README.md`}.`));
     }
 
     const directDocumentDirs = this.directDocumentDirectories(virtualPath, abs, entries);
@@ -640,10 +620,6 @@ export class WorkspaceSandbox {
       if (hasReadme && !childMeta?.tags.length) suggestions.push(`${child.virtualPath} has no README frontmatter tags; Reader card may be weak.`);
     }
 
-    if (virtualPath === "docs" && markdownPages.length > 0) {
-      warnings.push("docs root has sibling Markdown pages; durable top-level subjects usually belong in docs/sub_docs/<slug>/README.md");
-    }
-
     return {
       kind,
       path: virtualPath,
@@ -653,7 +629,6 @@ export class WorkspaceSandbox {
       summary: metadata?.summary,
       status: metadata?.status,
       tags: metadata?.tags ?? [],
-      pages,
       childDocuments,
       warnings,
       suggestions,
@@ -676,7 +651,7 @@ export class WorkspaceSandbox {
 
   private async section(cwd: string, args: string[]) {
     const [file, headingArg] = args.filter((arg) => arg !== "--context" && !/^\d+$/.test(arg));
-    if (!file || !headingArg) throw new SandboxError('section requires a file and heading, for example: section docs/page.md "## Heading"');
+    if (!file || !headingArg) throw new SandboxError('section requires a file and heading, for example: section docs/sub_docs/example/README.md "## Heading"');
     const contextIndex = args.indexOf("--context");
     const context = contextIndex >= 0 ? Number(args[contextIndex + 1]) : 0;
     if (!Number.isInteger(context) || context < 0 || context > 20) throw new SandboxError("section context must be between 0 and 20");
@@ -896,7 +871,7 @@ export class WorkspaceSandbox {
     const dryRun = args.includes("--dry-run");
     const positional = args.filter((arg) => arg !== "--dry-run");
     const [file, heading] = positional;
-    if (!file || !heading) throw new SandboxError('replace_section requires a file and heading, for example: replace_section docs/page.md "## Heading" <<EOF');
+    if (!file || !heading) throw new SandboxError('replace_section requires a file and heading, for example: replace_section docs/sub_docs/example/README.md "## Heading" <<EOF');
     if (Buffer.byteLength(body) > this.options.writeLimitBytes) throw new SandboxError("replace_section body is too large");
 
     const resolved = await this.resolvePath(file, cwd);
@@ -1065,11 +1040,12 @@ export class WorkspaceSandbox {
     if (!hasReadme && canonicalPath !== "." && isDocumentLikeDirectory(canonicalPath)) {
       issues.push(lintIssue("error", "document-package", `document package missing README.md: ${virtualPath}`));
     }
-    if (mdPages.length >= DOCUMENT_PAGE_COUNT_WARNING_THRESHOLD) {
-      issues.push(lintIssue("warn", "document-package", `document package has ${mdPages.length} same-document pages; consider splitting durable subtopics into child documents: ${virtualPath}`));
+    if (mdPages.length > 0) {
+      const targets = mdPages.map((entry) => `${entry.name} -> ${siblingMarkdownMoveTarget(virtualPath, entry.name)}`).join(", ");
+      issues.push(lintIssue("warn", "document-package", `document package has stale sibling Markdown files; move or merge them: ${virtualPath} (${targets})`));
     }
     if (canonicalPath === "docs" && mdPages.length > 0) {
-      issues.push(lintIssue("warn", "placement", `docs root contains same-document pages (${mdPages.map((entry) => entry.name).join(", ")}); top-level durable subjects should usually be child document packages`));
+      issues.push(lintIssue("warn", "placement", `docs root contains stale sibling Markdown files (${mdPages.map((entry) => entry.name).join(", ")}); top-level durable subjects belong in docs/sub_docs/<slug>/README.md`));
     }
     if (!options.shallow) {
       for (const entry of directDocumentDirs) {
@@ -1717,6 +1693,15 @@ function formatNumberedLines(text: string) {
   return lines.map((line, index) => `${String(index + 1).padStart(width, " ")}\t${line}`).join("\n");
 }
 
+function isDocsTreePath(virtualPath: string) {
+  return canonicalWorkspacePath(virtualPath).split("/")[0] === "docs";
+}
+
+function siblingMarkdownMoveTarget(parentPath: string, fileName: string) {
+  const slug = fileName.replace(/\.(md|markdown)$/i, "");
+  return toVirtualPath(path.posix.join(parentPath, CHILD_DOCUMENTS_DIRECTORY, slug, "README.md"));
+}
+
 function formatDocumentInspection(info: DocumentInspection) {
   const lines = [
     `kind: ${info.kind}`,
@@ -1729,16 +1714,6 @@ function formatDocumentInspection(info: DocumentInspection) {
     info.tags?.length ? `tags: ${info.tags.join(", ")}` : undefined,
     ""
   ].filter((line): line is string => line !== undefined);
-
-  if (info.pages?.length) {
-    lines.push(`same-document pages (${info.pages.length}):`);
-    for (const page of info.pages) {
-      lines.push(`- [${page.role}] ${page.path} title="${page.title}" headings=${page.headings}`);
-    }
-    lines.push("");
-  } else {
-    lines.push("same-document pages (0):", "");
-  }
 
   if (info.childDocuments?.length) {
     lines.push(`child documents (${info.childDocuments.length}):`);
@@ -2758,9 +2733,9 @@ function helpText(document?: string) {
       "diff compares two files, compares a file with proposed full-file heredoc content, or shows recorded changes for a file.",
       "",
       "Examples:",
-      "diff docs/page.md",
-      "diff docs/page.md docs/page-copy.md",
-      "diff docs/page.md <<EOF",
+      "diff docs/sub_docs/example/README.md",
+      "diff docs/sub_docs/example/README.md docs/sub_docs/example-copy/README.md",
+      "diff docs/sub_docs/example/README.md <<EOF",
       "# Proposed full file content",
       "EOF",
       "",
@@ -2777,12 +2752,12 @@ function helpText(document?: string) {
       "Markdown structure commands help agents update existing sections instead of appending stale conclusions.",
       "",
       "Read commands:",
-      "toc docs/page.md",
-      "section docs/page.md \"## Heading\"",
-      "section docs/page.md \"## Heading\" --context 2",
+      "toc docs/sub_docs/example/README.md",
+      "section docs/sub_docs/example/README.md \"## Heading\"",
+      "section docs/sub_docs/example/README.md \"## Heading\" --context 2",
       "",
       "Write command:",
-      "replace_section docs/page.md \"## Heading\" <<'EOF'",
+      "replace_section docs/sub_docs/example/README.md \"## Heading\" <<'EOF'",
       "## Heading",
       "",
       "New section body.",
@@ -2802,17 +2777,15 @@ function helpText(document?: string) {
       "inspect_doc docs",
       "inspect_doc docs/sub_docs/example",
       "inspect_doc docs/sub_docs/example/README.md",
-      "inspect_doc docs/sub_docs/example/second-page.md",
       "",
       "It returns:",
-      "- whether the target is a document package, same-document page, or file",
+      "- whether the target is a document package or file",
       "- the README body path",
-      "- same-document pages",
       "- child documents",
       "- Reader card title/summary/tags/status when available",
       "- structural warnings, suggestions, and recommended next commands",
       "",
-      "Use inspect_doc before creating a new page or child document."
+      "Use inspect_doc before creating or editing a child document."
     ].join("\n");
   }
 
@@ -2839,7 +2812,7 @@ function helpText(document?: string) {
       "patch_many applies multiple exact replacements to one file atomically.",
       "",
       "Example:",
-      "patch_many docs/page.md --dry-run <<'EOF'",
+      "patch_many docs/sub_docs/example/README.md --dry-run <<'EOF'",
       "[",
       "  {\"old_text\":\"old A\", \"new_text\":\"new A\"},",
       "  {\"old_text\":\"old B\", \"new_text\":\"new B\"}",
@@ -2858,7 +2831,7 @@ function helpText(document?: string) {
       "Examples:",
       "changes",
       "changes --stat",
-      "diff docs/page.md",
+      "diff docs/sub_docs/example/README.md",
       "",
       "Use changes after write, append, patch, patch_many, or replace_section to verify what changed.",
       "changes is not a version-control system. Multi-command write batches roll back on execution failure, but committed successful edits should be reviewed with diff/changes and restored from backup if a broad mistake was already accepted."
@@ -2871,10 +2844,10 @@ function helpText(document?: string) {
       "lint_stale_append is the older narrow check for stale appended conclusions.",
       "",
       "Examples:",
-      "lint_stale_append docs/page.md",
-      "lint_doc docs/page.md",
+      "lint_stale_append docs/sub_docs/example/README.md",
+      "lint_doc docs/sub_docs/example/README.md",
       "lint_doc docs/sub_docs/example",
-      "lint_doc docs/page.md --stale-next-steps",
+      "lint_doc docs/sub_docs/example/README.md --stale-next-steps",
       "",
       "lint_doc reports:",
       "- repeated or stale current-state / next-step sections",
@@ -2905,24 +2878,22 @@ function helpText(document?: string) {
       "- Use self/ only for stable user preferences, principles, durable context, or explicit memory requests.",
       "- self/ is user-visible Agent context, not hidden agent memory or an ordinary document; do not move or archive it.",
       "- Prefer patch for durable edits, append for journal events, and write only for new files or intentional replacement.",
-      "- Read nearby README.md files and sibling pages before creating new files.",
+      "- Read nearby README.md files and child documents before creating new files.",
       "- Do not paste raw chat transcripts; distill decisions, state, open questions, and reusable context.",
       "",
       "Reader rendering contract:",
       "- Directory = document package.",
-      "- README.md = document body.",
-      "- Sibling .md files = pages in the same document; Reader expands them after README.md.",
+      "- README.md = the only document body.",
       "- docs/sub_docs/<slug>/ directories are top-level documents under the compiled-wiki root document.",
       "- sub_docs/<slug>/ directories = child documents; Reader shows them in navigation and as cards below the current document.",
       "- _attachments/ = files that belong to the current document; it is not a child document.",
       "- Document: docs/sub_docs/<slug>/README.md.",
       "- Child document: <parent>/sub_docs/<slug>/README.md.",
-      "- Same-document page: <parent>/<page>.md.",
       "",
       "Tree contract:",
       "- The physical directory tree is the source of truth for parent/child relationships.",
       "- Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
-      "- Keep slugs stable and readable. Prefer lowercase-kebab-case for directory and page names.",
+      "- Keep slugs stable and readable. Prefer lowercase-kebab-case for document directory names.",
       "",
       "Recommended README frontmatter for durable docs:",
       "---",
@@ -2972,7 +2943,7 @@ function helpText(document?: string) {
       "- journal/: chronological operation log for ingests, queries, lint passes, and unsettled context.",
       "",
       "Ingest:",
-      "1. Read AGENTS.md, docs/README.md, sources/README.md, and relevant nearby wiki pages.",
+      "1. Read AGENTS.md, docs/README.md, sources/README.md, and relevant nearby wiki documents.",
       "2. Create or preserve a source note under sources/YYYY/MM/YYYY-MM-DD-<slug>.md when needed.",
       "3. Patch relevant docs/ pages with durable synthesis and links back to sources/ when provenance matters.",
       "4. Update docs/README.md if discoverability changes.",
@@ -2984,7 +2955,7 @@ function helpText(document?: string) {
       "- File durable synthesis back into docs/ when useful.",
       "",
       "Lint:",
-      "- Check contradictions, stale claims, orphan pages, missing source links, and important concepts without pages.",
+      "- Check contradictions, stale claims, orphan documents, missing source links, and important concepts without durable documents.",
       "- Record lint findings in journal before broad reorganization.",
       "- Use inspect_doc to understand document package boundaries before moving or creating files.",
       "- Use lint_doc <path> after edits to catch wrong-layer writes, broken links, and Reader-card issues.",
@@ -3033,11 +3004,11 @@ function helpText(document?: string) {
     "Document conventions:",
     "- Directory = document package; README.md = body.",
     "- docs/sub_docs/<slug>/ directories are top-level documents under the compiled-wiki root document.",
-    "- Sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
+    "- README.md is the only document body; sub_docs/<slug>/ directories = child documents.",
     "- _attachments/ stores files for the current document; it is not a child document.",
     "- The physical directory tree is the source of truth; do not create hidden JSON indexes unless the user asks.",
     "- Reader renders sub_docs/<slug>/ directories as preview cards using README title/summary/tags/status.",
-    "- sources/ holds raw source material; docs/ holds compiled wiki pages.",
+    "- sources/ holds raw source material; docs/ holds compiled wiki documents.",
     "- Journal note: journal/YYYY/MM/YYYY-MM-DD.md",
     "- Default fresh context to journal; compile only stable reusable knowledge to docs.",
     "- self/ is user-visible Agent context; update it sparingly and never move/archive it.",

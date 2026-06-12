@@ -399,8 +399,10 @@ result = await sandbox.run("inspect_doc docs/sub_docs/pkg");
 assert.equal(result.ok, true);
 assert.match(result.stdout, /kind: document-package/);
 assert.match(result.stdout, /body: docs\/sub_docs\/pkg\/README\.md/);
-assert.match(result.stdout, /same-document pages \(2\)/);
-assert.match(result.stdout, /\[page\] docs\/sub_docs\/pkg\/notes\.md/);
+assert.doesNotMatch(result.stdout, /same-document pages/);
+assert.doesNotMatch(result.stdout, /\[page\] docs\/sub_docs\/pkg\/notes\.md/);
+assert.match(result.stdout, /stale sibling Markdown files: notes\.md/);
+assert.match(result.stdout, /docs\/sub_docs\/pkg\/sub_docs\/notes\/README\.md/);
 assert.match(result.stdout, /child documents \(1\)/);
 assert.match(result.stdout, /docs\/sub_docs\/pkg\/sub_docs\/child/);
 assert.match(result.stdout, /status: active/);
@@ -456,24 +458,26 @@ assert.equal(result.ok, true);
 result = await sandbox.run("inspect_doc docs/sub_docs/fat");
 assert.equal(result.ok, true);
 assert.match(result.stdout, /suggestions:/);
-assert.match(result.stdout, /has 12 same-document pages/);
+assert.match(result.stdout, /stale sibling Markdown files/);
+assert.match(result.stdout, /page-01\.md -> docs\/sub_docs\/fat\/sub_docs\/page-01\/README\.md|page-01\.md to docs\/sub_docs\/fat\/sub_docs\/page-01\/README\.md/);
 
 result = await sandbox.run("lint_doc docs/sub_docs/fat");
 assert.equal(result.ok, true);
-assert.match(result.stdout, /\[warn\] document-package: document package has 12 same-document pages/);
+assert.match(result.stdout, /\[warn\] document-package: document package has stale sibling Markdown files/);
 
 result = await sandbox.run("inspect_doc docs/sub_docs/pkg/notes.md");
 assert.equal(result.ok, true);
-assert.match(result.stdout, /kind: same-document-page/);
-assert.match(result.stdout, /input is a same-document page/);
+assert.match(result.stdout, /kind: file/);
+assert.match(result.stdout, /stale sibling Markdown file/);
+assert.match(result.stdout, /docs\/sub_docs\/pkg\/sub_docs\/notes\/README\.md/);
 
 result = await sandbox.run("lint_doc docs/sub_docs/pkg/README.md");
 assert.equal(result.ok, true);
-assert.equal(result.stdout, "no document lint issues found");
+assert.match(result.stdout, /stale sibling Markdown files/);
 
 result = await sandbox.run("lint_doc docs/sub_docs/pkg");
 assert.equal(result.ok, true);
-assert.equal(result.stdout, "no document lint issues found");
+assert.match(result.stdout, /stale sibling Markdown files/);
 
 result = await sandbox.run(`mkdir docs/sub_docs/pkg/direct-child
 write docs/sub_docs/pkg/direct-child/README.md <<'EOF'
@@ -533,7 +537,7 @@ assert.equal(result.ok, true);
 result = await sandbox.run("lint_doc docs/session-residue.md");
 assert.equal(result.ok, true);
 assert.match(result.stdout, /looks like journal\/session residue/);
-assert.match(result.stdout, /docs root contains same-document pages/);
+assert.match(result.stdout, /docs root contains stale sibling Markdown files/);
 assert.match(result.stdout, /\[warn\] placement/);
 
 result = await sandbox.run(`write sources/compiled.md <<'EOF'
@@ -564,7 +568,7 @@ result = await sandbox.run("workspace_health");
 assert.equal(result.ok, true);
 assert.match(result.stdout, /Workspace Entropy Snapshot/);
 assert.match(result.stdout, /totals: error \d+, warn \d+, info \d+/);
-assert.match(result.stdout, /document package has 12 same-document pages/);
+assert.match(result.stdout, /document package has stale sibling Markdown files/);
 assert.match(result.stdout, /broken internal link/);
 assert.match(result.stdout, /recommended next commands/);
 

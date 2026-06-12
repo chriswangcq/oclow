@@ -12,10 +12,10 @@ import type { AuditEvent, SandboxCommandResult, WorkspaceFileEntry } from "@ai-m
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import matter from "gray-matter";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import * as z from "zod/v4";
 import { AuthzError, assertWorkspaceBelongsToUser, mcpScopesToSandboxScope } from "./authz.js";
+import { buildDocumentPackage, listChildDocumentCards } from "./document-reader.js";
 import { renderWorkspaceFile } from "./markdown.js";
 import { SystemStore, normalizeEmail, tokenHash, type UserRecord, type WorkspaceRecord } from "./system-store.js";
 import { ensureDefaultWorkspace as ensureWorkspaceTemplate } from "./workspace-template.js";
@@ -59,13 +59,6 @@ const GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
 const GOOGLE_JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"));
 const GOOGLE_LOGIN_COOKIE = "google_login_state";
 const GOOGLE_LOGIN_TTL_SECONDS = 10 * 60;
-const AGENT_CONTEXT_ROOT = "self";
-const LEGACY_AGENT_CONTEXT_ROOT = "docs/self";
-const SOURCES_ROOT = "sources";
-const SYSTEM_DOCUMENT_PATHS = new Set([AGENT_CONTEXT_ROOT, LEGACY_AGENT_CONTEXT_ROOT]);
-const CHILD_DOCUMENTS_DIRECTORY = "sub_docs";
-const DOCUMENT_ATTACHMENTS_DIRECTORY = "_attachments";
-const DOCUMENT_AUXILIARY_DIRECTORIES = new Set([DOCUMENT_ATTACHMENTS_DIRECTORY, CHILD_DOCUMENTS_DIRECTORY]);
 const CANONICAL_AGENT_CONTRACT = "AGENTS.md is the canonical operating contract. If any MCP/resource/help text conflicts with AGENTS.md, follow AGENTS.md and leave a note about the drift.";
 const AGENT_DOCUMENT_LOOP = "read -> locate -> patch -> verify -> organize";
 const RUN_SHELL_DSL_SUMMARY =
@@ -106,12 +99,12 @@ const MCP_RUN_SHELL_DESCRIPTION = [
   "- self/ is user-visible personal context, not hidden agent memory or an ordinary document. Read it when relevant; write only stable, durable user context.",
   "",
   "Reader contract:",
-  "- Directory = document package; README.md = document body; sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
+  "- Directory = document package; README.md = the only document body; sub_docs/<slug>/ directories = child documents.",
   "- docs/ is the compiled-wiki root document; top-level documents live under docs/sub_docs/<slug>/.",
   "- _attachments/ stores files that belong to the current document and is not a child document.",
   "- The physical directory tree is the source of truth for parent/child relationships; do not create hidden JSON indexes or ID-only folders unless the user explicitly asks.",
   "- Durable README.md files may use frontmatter: title, summary, tags, status. Status values: active, draft, reference, archived.",
-  "- Reader opens a directory as README.md plus sibling pages, and previews sub_docs/<slug>/ directories as child-document cards.",
+  "- Reader opens a directory by rendering README.md and previewing sub_docs/<slug>/ directories as child-document cards.",
   "- Child-document cards use sub_docs/<slug>/README.md frontmatter title/summary/tags/status when present, then fall back to # heading, first paragraph, and path tags.",
   "",
   "Safe operating loop:",
@@ -119,7 +112,7 @@ const MCP_RUN_SHELL_DESCRIPTION = [
   "- Locate the right document package with inspect_doc, tree, rg, toc, and section before creating or editing files.",
   "- Ingest: preserve the raw source, compile the stable synthesis into docs, then append a journal event.",
   "- Query: answer from the compiled wiki first; consult sources only when citations or unresolved details are needed.",
-  "- Lint: look for contradictions, stale claims, orphan pages, missing source links, and important concepts without pages.",
+  "- Lint: look for contradictions, stale claims, orphan documents, missing source links, and important concepts without durable documents.",
   "- Anti-entropy rule: default to journal for fresh context, promote stable reusable knowledge into docs, preserve source material in sources, and write to self only for durable user memory.",
   "- Prefer patch/append over whole-file rewrites. Create new files or directories only when the content has a clear durable home.",
   "- Verify after writing with changes, inspect_doc, toc, and lint_doc on the changed package or file.",
@@ -192,7 +185,7 @@ const WORKSPACE_INFO_BASE_TEXT = [
   "4. sources/README.md",
   "5. self/README.md",
   "6. journal/README.md",
-  "7. Nearby README.md files, sibling pages, child documents, and source files relevant to the task.",
+  "7. Nearby README.md files, child documents, and source files relevant to the task.",
   "",
   "## LLM Wiki Layers",
   "",
@@ -214,9 +207,9 @@ const WORKSPACE_INFO_BASE_TEXT = [
   "",
   "## Standard Operations",
   "",
-  "- Ingest: read or create the source in sources/, update relevant compiled wiki pages in docs/, update docs/README.md when discoverability changes, then append a journal event.",
+  "- Ingest: read or create the source in sources/, update relevant compiled wiki documents in docs/, update docs/README.md when discoverability changes, then append a journal event.",
   "- Query: search and read docs/ first, consult sources/ for citations or unresolved details, answer with file references, and offer to file durable synthesis back into docs/.",
-  "- Lint: inspect docs/ and journal/ for contradictions, stale claims, orphan documents, missing cross-links, missing source links, wrong-layer writes, broken links, and concepts that deserve pages.",
+  "- Lint: inspect docs/ and journal/ for contradictions, stale claims, orphan documents, missing cross-links, missing source links, wrong-layer writes, broken links, and concepts that deserve durable documents.",
   "",
   "## Write Policy",
   "",
@@ -228,18 +221,18 @@ const WORKSPACE_INFO_BASE_TEXT = [
   "- Promote stable reusable knowledge into docs/ when it has a clear durable home.",
   "- Write self/ only for stable user preferences, principles, durable context, or explicit memory requests.",
   "- Prefer append for journal events and patch for durable edits. Use write_file for large structured content from MCP clients. Use write for new files or intentional replacement only.",
-  "- Before creating a page or child document, run inspect_doc on the parent package.",
+  "- Before creating a child document, run inspect_doc on the parent package.",
   "- After edits, run changes and lint_doc on the changed file or package.",
   "- Multi-command write batches roll back on execution failure, but successful edits still need review; use backups/snapshots for broad recovery.",
   "- Never paste raw chat transcripts. Distill decisions, state, open questions, links, and reusable context.",
   "",
   "## Reader Contract",
   "",
-  "- Directory = document package; README.md = body; sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
+  "- Directory = document package; README.md = the only body; sub_docs/<slug>/ directories = child documents.",
   "- `docs/` is the compiled-wiki root document; top-level documents live under `docs/sub_docs/<slug>/`.",
   "- _attachments/ stores files that belong to the current document and is not a child document.",
   "- The physical directory tree is the source of truth. Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
-  "- Reader opens a directory as README.md plus sibling pages.",
+  "- Reader opens a directory by rendering README.md.",
   "- Reader previews sub_docs/<slug>/ directories as child-document cards.",
   "- Child-document cards prefer README frontmatter title/summary/tags/status, then fall back to heading, first paragraph, and path tags.",
   "",
@@ -337,7 +330,7 @@ const LLMS_TXT_RESOURCE_TEXT = [
   "## Architecture",
   "",
   "- `sources/`: raw source layer. Curated input, provenance, minimal mutation.",
-  "- `docs/`: compiled wiki layer. Stable synthesis, concept pages, entity pages, decisions, and cross-links.",
+  "- `docs/`: compiled wiki layer. Stable synthesis, concept documents, entity documents, decisions, and cross-links.",
   "- `AGENTS.md`: schema layer. The operating contract for agents.",
   "- `journal/`: operation log. Ingests, queries, lint passes, changes, and unsettled context.",
   "- `self/`: user-visible Agent context. Use only for durable preferences, principles, and long-lived user context.",
@@ -347,13 +340,12 @@ const LLMS_TXT_RESOURCE_TEXT = [
   "",
   "- Ingest: preserve or create a source, update the compiled wiki by editing document packages, append a journal event.",
   "- Query: search/read the compiled wiki first, consult sources for citations, then optionally file durable synthesis back into docs.",
-  "- Lint: find contradictions, stale claims, orphan pages, missing cross-links, missing source links, wrong-layer writes, broken links, and concepts without pages.",
+  "- Lint: find contradictions, stale claims, orphan documents, missing cross-links, missing source links, wrong-layer writes, broken links, and concepts without durable documents.",
   "",
   "## Document Model",
   "",
   "- Directory = document package.",
-  "- `README.md` = document body.",
-  "- Sibling `.md` files = same-document pages.",
+  "- `README.md` = the only document body.",
   "- `sub_docs/<slug>/` directories = child documents.",
   "- `_attachments/` = files that belong to the current document; not a child document.",
   "- The physical directory tree is the source of truth for parent/child relationships.",
@@ -362,7 +354,7 @@ const LLMS_TXT_RESOURCE_TEXT = [
   "## Write Policy",
   "",
   "- Read nearby README files before writing.",
-  "- Run `inspect_doc <path>` before creating a sibling page or child document in an unfamiliar package.",
+  "- Run `inspect_doc <path>` before creating a child document in an unfamiliar package.",
   "- Preserve raw material in `sources/`; do not use it as a dumping ground for chat residue.",
   "- Default fresh context to `journal/YYYY/MM/YYYY-MM-DD.md`.",
   "- Compile stable reusable knowledge into `docs/`.",
@@ -453,12 +445,12 @@ const WIKI_MAINTENANCE_SKILL_TEXT = [
   "",
   "## Ingest Workflow",
   "",
-  "1. Read `AGENTS.md`, `docs/README.md`, `sources/README.md`, and nearby wiki pages.",
+  "1. Read `AGENTS.md`, `docs/README.md`, `sources/README.md`, and nearby wiki documents.",
   "2. If the material is not already in `sources/`, create a source note with provenance.",
   "3. Extract durable claims, entities, concepts, decisions, contradictions, and open questions.",
-  "4. Run `inspect_doc <parent>` before adding a sibling page or child document.",
-  "5. Update the relevant `docs/` pages with stable synthesis and links back to source files.",
-  "6. Create a new docs page only when the concept or entity has durable independent value.",
+  "4. Run `inspect_doc <parent>` before adding a child document.",
+  "5. Update the relevant `docs/` documents with stable synthesis and links back to source files.",
+  "6. Create a new docs child document only when the concept or entity has durable independent value.",
   "7. Update `docs/README.md` when discoverability changes.",
   "8. Run `changes` and `lint_doc <changed-path>` after writing.",
   "9. Append a journal event recording the ingest and changed files.",
@@ -466,7 +458,7 @@ const WIKI_MAINTENANCE_SKILL_TEXT = [
   "## Query Workflow",
   "",
   "1. Read `docs/README.md` and use `rg` over `docs/` first.",
-  "2. Read relevant compiled wiki pages before opening raw sources.",
+  "2. Read relevant compiled wiki documents before opening raw sources.",
   "3. Consult `sources/` only for citations, provenance, or unresolved details.",
   "4. Answer with file references and uncertainty where needed.",
   "5. If the answer produces durable synthesis, update or create a `docs/` page and append a journal event.",
@@ -475,16 +467,16 @@ const WIKI_MAINTENANCE_SKILL_TEXT = [
   "",
   "Look for:",
   "",
-  "- Contradictions between pages.",
+  "- Contradictions between documents.",
   "- Claims in `docs/` with no source link when provenance matters.",
   "- Stale claims superseded by newer sources or journal decisions.",
   "- Orphan documents with no inbound or obvious parent links.",
-  "- Important recurring concepts that lack a page.",
+  "- Important recurring concepts that lack a durable document.",
   "- Raw notes in `journal/` that should be promoted into `docs/`.",
   "- Personal facts in `docs/` that belong in `self/`, or uncertain personal facts that should stay out of `self/`.",
-  "- Same-document pages confused with child documents.",
+  "- Stale sibling Markdown files inside document packages.",
   "- Missing README.md files in document packages.",
-  "- Page-heavy document packages that should be split into child documents.",
+  "- Heading-heavy README files or broad documents that should be split into child documents.",
   "- Broken relative Markdown links.",
   "",
   "Write lint results as a concise journal event first. Only reorganize files when the user asks or the local destination is obvious.",
@@ -505,7 +497,7 @@ const WIKI_MAINTENANCE_SKILL_TEXT = [
   "lint_doc docs/sub_docs/<slug>",
   "changes",
   "nl docs/README.md",
-  "diff docs/page.md <<EOF",
+  "diff docs/sub_docs/<slug>/README.md <<EOF",
   "# proposed full file content",
   "EOF",
   "help patch",
@@ -549,7 +541,7 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "- `[error] document-package`: missing README.md or malformed document package. Fix before adding content.",
   "- `[error] link`: broken relative Markdown link. Repair or remove the link.",
   "- `[warn] placement`: content may be in the wrong layer, such as journal residue in docs/ or synthesis in sources/.",
-  "- `[warn] document-package`: too many same-document pages or child documents without a proper body.",
+  "- `[warn] document-package`: stale sibling Markdown files, direct child directories, or child documents without a proper body.",
   "- `[warn] stale-state`: repeated current-state/next-step sections or completed work still listed as pending.",
   "- `[info] reader-card`: missing summary/tags. Improve when the child document is important for humans.",
   "- `[info] document-size`: heading-heavy pages. Split only when navigation is genuinely suffering.",
@@ -610,16 +602,15 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "## Document Package Rules",
   "",
   "- Directory = document package.",
-  "- README.md = main body of that document package.",
-  "- Sibling .md files = pages in the same document.",
+  "- README.md = the only body of that document package.",
   "- docs/sub_docs/<slug>/ directories are top-level documents under the compiled-wiki root document.",
   "- sub_docs/<slug>/ directories = child documents.",
   "- _attachments/ = files that belong to the current document and are hidden from child-document navigation.",
   "- Use <parent>/sub_docs/<slug>/README.md for a child document.",
-  "- Use <parent>/<page>.md for a same-document page.",
-  "- If a continuation is small, patch the README or add a sibling page instead of creating a child document.",
-  "- If a package has many same-document pages, use `inspect_doc` suggestions to decide which durable subtopics deserve child document packages.",
-  "- A same-document page is not a child document. Do not move it under a directory unless the content has a durable independent shape.",
+  "- Do not create sibling Markdown pages such as <parent>/<page>.md inside docs document packages.",
+  "- If a continuation is small, patch the README section.",
+  "- If a subtopic has durable independent shape, create a child document package under sub_docs.",
+  "- If `lint_doc` reports stale sibling Markdown files, merge them into README.md or move durable content to child documents.",
   "",
   "## Reader Card Metadata",
   "",
@@ -652,7 +643,7 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "",
   "## Cleanup Playbooks",
   "",
-  "Page-heavy document package:",
+  "Heading-heavy or stale-sibling document package:",
   "",
   "```text",
   "inspect_doc docs/sub_docs/<slug>",
@@ -661,7 +652,7 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "tree docs/sub_docs/<slug> --depth 2",
   "```",
   "",
-  "Then move only durable independent subtopics into child documents. Keep small continuations as sibling pages or README sections.",
+  "Then move only durable independent subtopics into child documents. Keep small continuations as README sections.",
   "",
   "Wrong-layer write:",
   "",
@@ -893,34 +884,6 @@ type JournalBlock = {
   excerpt: string;
 };
 
-type ChildDocumentCard = {
-  path: string;
-  readmePath?: string;
-  title: string;
-  summary: string;
-  status?: string;
-  tags: string[];
-  updatedAt: string;
-  pageCount: number;
-  childCount: number;
-};
-
-type DocumentPage = {
-  sourcePath: string;
-  displayPath: string;
-  html: string;
-  depth: number;
-  pageNumber: number;
-};
-
-type DocumentPackage = {
-  path: string;
-  entries: WorkspaceFileEntry[];
-  siblingDocuments: ChildDocumentCard[];
-  childDocuments: ChildDocumentCard[];
-  pages: DocumentPage[];
-};
-
 const sessions = new Map<string, Session>();
 const mcpSessions = new Map<string, McpSession>();
 const oauthClients = new Map<string, OAuthClient>();
@@ -934,8 +897,6 @@ const OAUTH_CODE_TTL_MS = 10 * 60 * 1000;
 const OAUTH_ACCESS_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 const OAUTH_REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const OAUTH_SCOPES = ["workspace:read", "workspace:write"];
-const MAX_EXPANDED_PAGES = 60;
-const MAX_EXPAND_DEPTH = 4;
 const MIN_COMPRESSIBLE_BYTES = 1024;
 
 const systemStore = await SystemStore.open({
@@ -1808,7 +1769,7 @@ function createMcpServer(authContext: McpAuthContext) {
     {
       title: "Workspace Markdown File",
       description:
-        "Read a Markdown workspace file by URI. Use AGENTS.md for schema, sources/ for raw sources, docs/ for compiled wiki pages, journal/ for operation logs, and self/ for durable user context.",
+        "Read a Markdown workspace file by URI. Use AGENTS.md for schema, sources/ for raw sources, docs/ for compiled wiki documents, journal/ for operation logs, and self/ for durable user context.",
       mimeType: "text/markdown"
     },
     async (uri, variables) => {
@@ -2445,274 +2406,6 @@ async function listMcpWorkspaceResources(root: string) {
 
 function mcpFileUri(filePath: string) {
   return `ai-meditations://file/${filePath.split("/").map(encodeURIComponent).join("/")}`;
-}
-
-async function listChildDocumentCards(sandbox: WorkspaceSandbox, parentPath: string): Promise<ChildDocumentCard[]> {
-  const entries = await sandbox.listFiles(parentPath);
-  const directories = await collectChildDocumentEntries(sandbox, parentPath, entries);
-  const cards = await Promise.all(directories.map((entry) => describeChildDocument(sandbox, entry.path)));
-  return cards.sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
-}
-
-async function buildDocumentPackage(sandbox: WorkspaceSandbox, documentPath: string): Promise<DocumentPackage> {
-  const entries = await sandbox.listFiles(documentPath);
-  const [siblingDocuments, childDocuments, pages] = await Promise.all([
-    listSiblingDocumentCards(sandbox, documentPath),
-    listChildDocumentCards(sandbox, documentPath),
-    collectDocumentPages(sandbox, documentPath, entries)
-  ]);
-  return {
-    path: documentPath,
-    entries,
-    siblingDocuments,
-    childDocuments,
-    pages
-  };
-}
-
-async function listSiblingDocumentCards(sandbox: WorkspaceSandbox, documentPath: string) {
-  if (isDocumentRootPath(documentPath)) return [];
-  if (isSystemDocumentPath(documentPath)) return [];
-  const parentPath = siblingDocumentParentPath(documentPath);
-  const entries = await sandbox.listFiles(parentPath).catch(() => []);
-  return listChildDocumentCardsFromEntries(sandbox, entries);
-}
-
-function isDocumentRootPath(documentPath: string) {
-  return documentPath.replace(/\/+$/, "") === "docs";
-}
-
-function isSystemDocumentPath(documentPath: string) {
-  return SYSTEM_DOCUMENT_PATHS.has(documentPath.replace(/\/+$/, ""));
-}
-
-function isAuxiliaryDocumentDirectory(entry: WorkspaceFileEntry) {
-  return entry.kind === "directory" && DOCUMENT_AUXILIARY_DIRECTORIES.has(entry.name);
-}
-
-function isChildDocumentEntry(entry: WorkspaceFileEntry) {
-  return entry.kind === "directory" && !isSystemDocumentPath(entry.path) && !isAuxiliaryDocumentDirectory(entry);
-}
-
-function siblingDocumentParentPath(documentPath: string) {
-  const normalized = documentPath.replace(/\/+$/, "") || ".";
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length <= 1) return normalized;
-  parts.pop();
-  return parts.join("/");
-}
-
-async function listChildDocumentCardsFromEntries(sandbox: WorkspaceSandbox, entries: WorkspaceFileEntry[]) {
-  const directories = entries.filter((entry) => entry.kind === "directory" && !isAuxiliaryDocumentDirectory(entry) && !isSystemDocumentPath(entry.path));
-  const cards = await Promise.all(directories.map((entry) => describeChildDocument(sandbox, entry.path)));
-  return cards.sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
-}
-
-async function collectChildDocumentEntries(sandbox: WorkspaceSandbox, parentPath: string, entries: WorkspaceFileEntry[]) {
-  const rows: WorkspaceFileEntry[] = [];
-  const normalized = parentPath.replace(/\/+$/, "") || ".";
-  const subDocsPath = `${normalized}/${CHILD_DOCUMENTS_DIRECTORY}`.replace(/^\.\//, "");
-  const hasSubDocs = entries.some((entry) => entry.kind === "directory" && entry.name === CHILD_DOCUMENTS_DIRECTORY);
-  if (hasSubDocs) {
-    const subDocEntries = await sandbox.listFiles(subDocsPath).catch(() => []);
-    rows.push(...subDocEntries.filter(isChildDocumentEntry));
-  }
-  return rows;
-}
-
-async function collectDocumentPages(
-  sandbox: WorkspaceSandbox,
-  documentPath: string,
-  entries: WorkspaceFileEntry[],
-  depth = 0,
-  pages: DocumentPage[] = []
-) {
-  if (pages.length >= MAX_EXPANDED_PAGES || depth > MAX_EXPAND_DEPTH) return pages;
-
-  const readme = entries.find(isReadmeEntry);
-  if (readme) {
-    await addRenderedDocumentPage(sandbox, pages, readme.path, pageDisplayPath(documentPath), depth);
-  }
-
-  const sameDocumentFiles = entries.filter((entry) => entry.kind === "file" && isMarkdownEntry(entry) && !isReadmeEntry(entry));
-  for (const entry of sortDocumentEntries(sameDocumentFiles)) {
-    if (pages.length >= MAX_EXPANDED_PAGES) break;
-    await addRenderedDocumentPage(sandbox, pages, entry.path, pageDisplayPath(entry.path), depth + 1);
-  }
-
-  return pages;
-}
-
-async function addRenderedDocumentPage(
-  sandbox: WorkspaceSandbox,
-  pages: DocumentPage[],
-  sourcePath: string,
-  displayPath: string,
-  depth: number
-) {
-  const content = await sandbox.readFile(sourcePath);
-  const html = await renderWorkspaceFile(sourcePath, content);
-  pages.push({
-    sourcePath,
-    displayPath,
-    html,
-    depth,
-    pageNumber: pages.length + 1
-  });
-}
-
-async function describeChildDocument(sandbox: WorkspaceSandbox, documentPath: string): Promise<ChildDocumentCard> {
-  const entries = await sandbox.listFiles(documentPath);
-  const readme = entries.find((entry) => entry.kind === "file" && entry.name.toLowerCase() === "readme.md");
-  const markdownPages = entries.filter((entry) => entry.kind === "file" && /\.(md|markdown)$/i.test(entry.name));
-  const childDirs = await collectChildDocumentEntries(sandbox, documentPath, entries);
-  const auxiliaryDirs = entries.filter(isAuxiliaryDocumentDirectory);
-  const readmePath = readme?.path;
-  const readmeText = readmePath ? await sandbox.readFile(readmePath).catch(() => "") : "";
-  const parsed = parseDocumentReadme(readmeText, documentPath);
-  const updatedAt = latestEntryUpdate([readme, ...markdownPages, ...childDirs, ...auxiliaryDirs]);
-
-  return {
-    path: documentPath,
-    readmePath,
-    title: parsed.title,
-    summary: parsed.summary,
-    status: parsed.status,
-    tags: parsed.tags.length ? parsed.tags : inferDocumentTags(documentPath),
-    updatedAt,
-    pageCount: markdownPages.length,
-    childCount: childDirs.length
-  };
-}
-
-function parseDocumentReadme(content: string, documentPath: string) {
-  if (!content.trim()) {
-    return {
-      title: titleFromPath(documentPath),
-      summary: "",
-      status: undefined as string | undefined,
-      tags: [] as string[]
-    };
-  }
-
-  const parsed = matter(content);
-  const body = parsed.content.trimStart();
-  const title = typeof parsed.data.title === "string" && parsed.data.title.trim()
-    ? parsed.data.title.trim()
-    : firstMarkdownHeading(body) ?? titleFromPath(documentPath);
-  const summary = typeof parsed.data.summary === "string" && parsed.data.summary.trim()
-    ? parsed.data.summary.trim()
-    : firstMarkdownParagraph(body);
-
-  return {
-    title,
-    summary,
-    status: typeof parsed.data.status === "string" && parsed.data.status.trim()
-      ? parsed.data.status.trim().toLowerCase()
-      : undefined,
-    tags: normalizeDocumentTags(parsed.data.tags)
-  };
-}
-
-function firstMarkdownHeading(content: string) {
-  return content
-    .split(/\r?\n/)
-    .find((line) => /^#\s+\S/.test(line))
-    ?.replace(/^#\s+/, "")
-    .trim();
-}
-
-function firstMarkdownParagraph(content: string) {
-  const withoutTitle = content.replace(/^#\s+.+(?:\r?\n|$)/, "").trim();
-  const paragraphs = withoutTitle.split(/\n{2,}/).map((item) => item.trim());
-  const paragraph = paragraphs.find((item) => {
-    if (!item) return false;
-    if (/^(#{1,6}|```|~~~|>|[-*]\s|\d+\.\s)/.test(item)) return false;
-    return true;
-  });
-  return stripMarkdownInline(paragraph ?? "").slice(0, 180);
-}
-
-function stripMarkdownInline(value: string) {
-  return value
-    .replace(/!\[[^\]]*]\([^)]+\)/g, "")
-    .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
-    .replace(/[`*_~>#]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function normalizeDocumentTags(value: unknown) {
-  const raw = Array.isArray(value)
-    ? value
-    : typeof value === "string"
-      ? value.split(/[,，\s]+/)
-      : [];
-  return [...new Set(raw.map((item) => String(item).trim()).filter(Boolean))].slice(0, 6);
-}
-
-function inferDocumentTags(documentPath: string) {
-  const parts = documentPath.split("/").filter(Boolean);
-  if (documentPath.replace(/\/+$/, "") === AGENT_CONTEXT_ROOT) return ["agent-context"];
-  if (parts[0] === "docs") {
-    if (parts.length <= 2) return ["document"];
-    return parts.slice(1, -1).slice(-2);
-  }
-  if (parts[0] === SOURCES_ROOT) return ["source"];
-  if (parts[0] === "journal") return ["timeline"];
-  if (parts[0] === "archive") return ["archive"];
-  return ["document"];
-}
-
-function isReadmeEntry(entry: WorkspaceFileEntry) {
-  return entry.kind === "file" && entry.name.toLowerCase() === "readme.md";
-}
-
-function isMarkdownEntry(entry: WorkspaceFileEntry) {
-  return entry.kind === "file" && /\.(md|markdown)$/i.test(entry.name);
-}
-
-function sortDocumentEntries(entries: WorkspaceFileEntry[]) {
-  return [...entries].sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "file" ? -1 : 1;
-    return displayEntryName(a).localeCompare(displayEntryName(b), "zh-CN");
-  });
-}
-
-function displayEntryName(entry: WorkspaceFileEntry) {
-  if (entry.kind === "directory") return entry.name;
-  return entry.name.replace(/\.(md|markdown)$/i, "");
-}
-
-function pageDisplayPath(documentPath: string) {
-  if (!documentPath || documentPath === ".") return "Workspace";
-  const pathWithoutExtension = documentPath.toLowerCase().endsWith("/readme.md")
-    ? documentPath.slice(0, -"/README.md".length)
-    : documentPath.replace(/\.(md|markdown)$/i, "");
-  return humanDisplayPath(pathWithoutExtension);
-}
-
-function humanDisplayPath(documentPath: string) {
-  return documentPath
-    .split("/")
-    .filter((part) => part && part !== CHILD_DOCUMENTS_DIRECTORY)
-    .join("/") || ".";
-}
-
-function titleFromPath(documentPath: string) {
-  const name = documentPath.split("/").filter(Boolean).pop() ?? documentPath;
-  return name
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((part) => (/^[a-z]/.test(part) ? part[0].toUpperCase() + part.slice(1) : part))
-    .join(" ");
-}
-
-function latestEntryUpdate(entries: Array<{ updatedAt?: string } | undefined>) {
-  return entries
-    .map((entry) => entry?.updatedAt)
-    .filter((value): value is string => Boolean(value))
-    .sort((a, b) => b.localeCompare(a))[0] ?? "";
 }
 
 async function exportWorkspace(res: http.ServerResponse, context: WorkspaceContext) {

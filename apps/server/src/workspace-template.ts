@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import path from "node:path";
 
 const AGENT_CONTEXT_ROOT = "self";
@@ -43,7 +44,6 @@ export async function ensureDefaultWorkspace(root: string) {
       "- `docs/sub_docs/<slug>/` directories are top-level documents under this root.",
       "- A directory is a document package.",
       "- `README.md` is the document body.",
-      "- Sibling `.md` files are pages in the same document.",
       "- `sub_docs/<slug>/` directories are child documents.",
       "- `_attachments/` stores files that belong to this document and is not a child document.",
       "",
@@ -164,6 +164,8 @@ async function migrateDocumentPackageChildren(packageAbs: string) {
     }
   }
 
+  await migrateSiblingMarkdownFilesToChildDocuments(packageAbs, entries);
+
   for (const entry of entries) {
     if (!entry.isDirectory() || DOCUMENT_AUXILIARY_DIRECTORIES.has(entry.name)) continue;
     const childAbs = path.join(packageAbs, entry.name);
@@ -175,6 +177,38 @@ async function migrateDocumentPackageChildren(packageAbs: string) {
     if (await pathExists(targetAbs)) continue;
     await fs.rename(childAbs, targetAbs);
     await migrateDocumentPackageChildren(targetAbs);
+  }
+}
+
+async function migrateSiblingMarkdownFilesToChildDocuments(packageAbs: string, entries: Dirent[]) {
+  const markdownFiles = entries.filter((entry) => entry.isFile() && isSiblingMarkdownPage(entry.name));
+  if (!markdownFiles.length) return;
+
+  const subDocsAbs = path.join(packageAbs, CHILD_DOCUMENTS_DIRECTORY);
+  await fs.mkdir(subDocsAbs, { recursive: true });
+
+  for (const entry of markdownFiles) {
+    const sourceAbs = path.join(packageAbs, entry.name);
+    const targetDir = await nextAvailableChildDocumentDir(subDocsAbs, markdownPageSlug(entry.name));
+    await fs.mkdir(targetDir, { recursive: true });
+    await fs.rename(sourceAbs, path.join(targetDir, "README.md"));
+    await migrateDocumentPackageChildren(targetDir);
+  }
+}
+
+function isSiblingMarkdownPage(name: string) {
+  return /\.(md|markdown)$/i.test(name) && name.toLowerCase() !== "readme.md";
+}
+
+function markdownPageSlug(name: string) {
+  return name.replace(/\.(md|markdown)$/i, "");
+}
+
+async function nextAvailableChildDocumentDir(subDocsAbs: string, baseSlug: string) {
+  for (let index = 0; ; index += 1) {
+    const candidate = index === 0 ? baseSlug : index === 1 ? `${baseSlug}-page` : `${baseSlug}-page-${index}`;
+    const targetDir = path.join(subDocsAbs, candidate);
+    if (!(await pathExists(path.join(targetDir, "README.md")))) return targetDir;
   }
 }
 
@@ -206,7 +240,7 @@ async function ensureStarterDocument(root: string) {
       "",
       "- Humans see a lightweight document space.",
       "- Agents see an MCP-exposed LLM Wiki workspace.",
-      "- `sources/` keeps raw material, `docs/` keeps compiled wiki pages, and `journal/` keeps the timeline.",
+      "- `sources/` keeps raw material, `docs/` keeps compiled wiki documents, and `journal/` keeps the timeline.",
       "",
       "## Document Structure",
       "",
@@ -215,14 +249,13 @@ async function ensureStarterDocument(root: string) {
       "```text",
       "docs/sub_docs/example/",
       "  README.md",
-      "  second-page.md",
       "  _attachments/",
       "  sub_docs/",
       "    child-document/",
       "      README.md",
       "```",
       "",
-      "`docs/` is the root document. Top-level documents live under `docs/sub_docs/<slug>/`. `README.md` is the main page. Other Markdown files in the same directory are pages in the same document. `sub_docs/<slug>/` folders are child documents. `_attachments/` belongs to the current document and is not shown as a child document.",
+      "`docs/` is the root document. Top-level documents live under `docs/sub_docs/<slug>/`. `README.md` is the document body. `sub_docs/<slug>/` folders are child documents. `_attachments/` belongs to the current document and is not shown as a child document.",
       "",
       "The physical directory tree is the source of truth. Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
       "",
@@ -237,7 +270,7 @@ async function ensureStarterDocument(root: string) {
   );
 
   await writeIfMissing(
-    path.join(guideRoot, "connect-agent.md"),
+    path.join(guideRoot, CHILD_DOCUMENTS_DIRECTORY, "connect-agent", "README.md"),
     [
       "# Connect Agent",
       "",
@@ -286,14 +319,13 @@ function defaultAgentsContent() {
     "```text",
     "docs/sub_docs/example-document/",
     "  README.md",
-    "  second-page.md",
     "  _attachments/",
     "  sub_docs/",
     "    child-document/",
     "      README.md",
     "```",
     "",
-    "`docs/` is the compiled-wiki root document. Top-level documents live under `docs/sub_docs/<slug>/`. `README.md` is the body of its directory. Other `.md` files in the same directory are pages in the same document. `sub_docs/<slug>/` directories are child documents. `_attachments/` stores files that belong to the current document and is not a child document.",
+    "`docs/` is the compiled-wiki root document. Top-level documents live under `docs/sub_docs/<slug>/`. `README.md` is the only body of its directory. `sub_docs/<slug>/` directories are child documents. `_attachments/` stores files that belong to the current document and is not a child document.",
     "",
     "The physical directory tree is the source of truth for parent/child relationships. Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
     "",
@@ -316,7 +348,7 @@ function defaultAgentsContent() {
     "",
     "Query: search `docs/` first, consult `sources/` for provenance, answer with uncertainty and file references.",
     "",
-    "Lint: look for contradictions, stale claims, orphan pages, missing links, and concepts without pages.",
+    "Lint: look for contradictions, stale claims, orphan documents, missing links, and concepts without durable documents.",
     "",
     "## Anti-Entropy Rules",
     "",

@@ -17,8 +17,7 @@ Oclow treats directories as document packages:
 
 ```text
 docs/sub_docs/example/
-  README.md          # main page of this document package
-  second-page.md     # another page in the same document package
+  README.md          # only body of this document package
   _attachments/      # files owned by this document; not a child document
   sub_docs/
     child-document/

@@ -336,7 +336,7 @@ function defaultAgentsContent() {
     "",
     "`docs/`, `sources/`, `journal/`, `self/`, `archive/`, `AGENTS.md`, `index.md`, and `.meditations/` are protected layout entries.",
     "",
-    "The MCP `run_shell` tool is a limited file command interpreter, not a real shell. Prefer explicit file operations and patches.",
+    "The MCP `run_shell` tool is a limited file command interpreter, not a real shell. For large content from external MCP clients, prefer `write_file`; for exact replacements, prefer `patch_file`.",
     "",
     "Guiding principle: this workspace should help future agents continue the user's thinking without making memory heavier, noisier, or less trustworthy."
   ].join("\n");

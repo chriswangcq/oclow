@@ -36,6 +36,27 @@ assert.equal(result.ok, true);
 result = await sandbox.run("cat docs/legacy.md");
 assert.equal(result.stdout, "Legacy alias");
 
+result = await sandbox.writeTextFile("docs/structured.md", "# Structured\n\nhello", { scope: "write" });
+assert.equal(result.ok, true);
+assert.match(result.stdout, /write docs\/structured\.md/);
+
+let structuredText = await sandbox.readFile("docs/structured.md");
+assert.equal(structuredText, "# Structured\n\nhello");
+
+result = await sandbox.writeTextFile("docs/structured.md", "\nappended", { scope: "write", mode: "append" });
+assert.equal(result.ok, true);
+
+result = await sandbox.patchTextFile("docs/structured.md", "hello\nappended", "hello patched", { scope: "write" });
+assert.equal(result.ok, true);
+
+structuredText = await sandbox.readFile("docs/structured.md");
+assert.equal(structuredText, "# Structured\n\nhello patched");
+
+result = await sandbox.writeTextFile("docs/forbidden.md", "nope", { scope: "read" });
+assert.equal(result.ok, false);
+assert.equal(result.errorType, "forbidden");
+assert.match(result.stderr ?? "", /Command requires write scope/);
+
 result = await sandbox.run("write docs/inline.md # Inline content is rejected", { scope: "write" });
 assert.equal(result.ok, false);
 assert.match(result.stderr ?? "", /write requires heredoc content/);

@@ -15,6 +15,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import matter from "gray-matter";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import * as z from "zod/v4";
+import { AuthzError, assertWorkspaceBelongsToUser, mcpScopesToSandboxScope } from "./authz.js";
 import { renderWorkspaceFile } from "./markdown.js";
 import { SystemStore, normalizeEmail, tokenHash, type UserRecord, type WorkspaceRecord } from "./system-store.js";
 import { ensureDefaultWorkspace as ensureWorkspaceTemplate } from "./workspace-template.js";
@@ -43,11 +44,14 @@ const config = {
   backupHour: Number(process.env.BACKUP_HOUR ?? 3),
   backupMinute: Number(process.env.BACKUP_MINUTE ?? 30),
   workspacesRoot: configuredWorkspacesRoot,
+  tokenEncryptionSecret: process.env.TOKEN_ENCRYPTION_SECRET ?? process.env.SESSION_SECRET ?? process.env.MCP_TOKEN ?? "local-dev-token-encryption-secret",
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   googleRedirectUri: process.env.GOOGLE_REDIRECT_URI ?? `${process.env.BASE_URL ?? "http://localhost:8787"}/auth/google/callback`,
   googleAllowedEmails: parseCsvList(process.env.GOOGLE_ALLOWED_EMAILS)
 };
+
+assertProductionSecurityConfig();
 
 const GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
@@ -66,6 +70,8 @@ const CANONICAL_AGENT_CONTRACT = "AGENTS.md is the canonical operating contract.
 const AGENT_DOCUMENT_LOOP = "read -> locate -> patch -> verify -> organize";
 const RUN_SHELL_DSL_SUMMARY =
   "run_shell is a constrained document-workspace DSL, not bash. Core commands include workspace_health, inspect_doc, rg, toc, section, patch, replace_section, changes, and lint_doc.";
+const STRUCTURED_WRITE_TOOLS_SUMMARY =
+  "For large content or external CLI/JSON callers, prefer write_file and patch_file over embedding heredocs inside run_shell.";
 
 const MCP_RUN_SHELL_DESCRIPTION = [
   "Run a limited filesystem command inside the user's AI Meditations workspace.",
@@ -86,6 +92,7 @@ const MCP_RUN_SHELL_DESCRIPTION = [
   "Supported read commands: help, pwd, ls, tree, find, rg, cat, nl, head, tail, stat, diff, changes, workspace_health, inspect_doc, toc, section, lint_stale_append, lint_doc.",
   "Supported write commands: mkdir, touch, write, append, patch, patch_many, replace_section, mv, cp, archive.",
   RUN_SHELL_DSL_SUMMARY,
+  STRUCTURED_WRITE_TOOLS_SUMMARY,
   "write, append, patch, patch_many, and replace_section require heredoc content; <<EOF and <<'EOF' are both accepted. Inline Markdown or JSON after the path is rejected.",
   "Choose a heredoc delimiter that does not appear alone in the body. If writing Markdown that contains literal EOF lines, use another delimiter such as DOC.",
   "Multiple commands are allowed in one call when each command starts on its own line. The whole batch is parsed before execution, so malformed trailing heredocs do not partially write earlier files.",
@@ -165,7 +172,10 @@ const WORKSPACE_INFO_BASE_TEXT = [
   "- Tool: get_workspace_info returns this LLM map.",
   "- Tool: get_workspace_info includes a current workspace_health entropy snapshot so newly connected agents can orient before editing.",
   "- Tool: run_shell runs a limited file command interpreter. It is not bash.",
+  "- Tool: write_file writes or appends UTF-8 text using structured JSON fields. Prefer it for large content and external CLI callers.",
+  "- Tool: patch_file applies exact-text old_text/new_text replacement using structured JSON fields.",
   `- Inner DSL: ${RUN_SHELL_DSL_SUMMARY}`,
+  `- Structured write guidance: ${STRUCTURED_WRITE_TOOLS_SUMMARY}`,
   `- Protocol: ${AGENT_DOCUMENT_LOOP}. Use inspect_doc before creating files in an unfamiliar area.`,
   "- Resource: ai-meditations://llms.txt is the shortest LLM-facing entrypoint.",
   "- Resource: ai-meditations://workspace/info mirrors this map.",
@@ -216,7 +226,7 @@ const WORKSPACE_INFO_BASE_TEXT = [
   "- Default fresh or uncertain context to journal/YYYY/MM/YYYY-MM-DD.md.",
   "- Promote stable reusable knowledge into docs/ when it has a clear durable home.",
   "- Write self/ only for stable user preferences, principles, durable context, or explicit memory requests.",
-  "- Prefer append for journal events and patch for durable edits. Use write for new files or intentional replacement only.",
+  "- Prefer append for journal events and patch for durable edits. Use write_file for large structured content from MCP clients. Use write for new files or intentional replacement only.",
   "- Before creating a page or child document, run inspect_doc on the parent package.",
   "- After edits, run changes and lint_doc on the changed file or package.",
   "- Multi-command write batches roll back on execution failure, but successful edits still need review; use backups/snapshots for broad recovery.",
@@ -316,7 +326,9 @@ const LLMS_TXT_RESOURCE_TEXT = [
   "- Wiki workflow: `ai-meditations://skills/wiki-maintenance`.",
   "- Cleanup workflow: `ai-meditations://skills/organize-workspace`.",
   "- File reader: `ai-meditations://file/{path}`.",
-  "- File writer: `run_shell` with limited commands.",
+  "- Structured file writer: `write_file` for JSON-safe multiline content, including optional `content_base64`.",
+  "- Structured exact patcher: `patch_file` with `old_text` and `new_text` JSON fields.",
+  "- Shell-like document DSL: `run_shell` with limited commands. It is not bash.",
   "- Document inspector: `run_shell` command `inspect_doc <path>`.",
   `- Inner DSL: ${RUN_SHELL_DSL_SUMMARY}`,
   "",
@@ -383,6 +395,8 @@ const LLMS_TXT_RESOURCE_TEXT = [
   "## Safety",
   "",
   "- `run_shell` is not bash and cannot run arbitrary executables.",
+  "- Use `write_file` for large content from external MCP clients instead of nesting heredocs inside JSON command strings.",
+  "- Use `patch_file` for exact old_text/new_text edits from external MCP clients.",
   "- Absolute paths and `..` are rejected.",
   "- `docs/`, `sources/`, `self/`, `journal/`, `archive/`, `AGENTS.md`, and `index.md` are protected roots unless the user explicitly asks otherwise.",
   "- For git-style unified diff patch syntax or legacy JSON patch syntax, run `help patch`.",
@@ -925,7 +939,8 @@ const systemStore = await SystemStore.open({
   systemRoot: config.systemRoot,
   workspacesRoot: config.workspacesRoot,
   legacyWorkspaceRoot: config.workspaceRoot,
-  defaultScopes: OAUTH_SCOPES.join(" ")
+  defaultScopes: OAUTH_SCOPES.join(" "),
+  tokenEncryptionSecret: config.tokenEncryptionSecret
 });
 systemStore.deleteExpiredWebSessions();
 systemStore.ensureDefaultOwner((config.googleAllowedEmails[0] || config.adminEmail).toLowerCase(), config.mcpToken);
@@ -939,6 +954,10 @@ const server = http.createServer(async (req, res) => {
     await route(req, res);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof AuthzError) {
+      sendJson(res, 403, { error: message });
+      return;
+    }
     sendJson(res, 500, { error: message });
   }
 });
@@ -1228,7 +1247,8 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
       workspace: {
         id: workspace.id,
         slug: workspace.slug,
-        root: workspace.rootPath,
+        root: ".",
+        virtualRoot: ".",
         mcpUrl: `${config.baseUrl}/mcp`
       }
     });
@@ -1527,18 +1547,18 @@ function createMcpServer(authContext: McpAuthContext) {
     version: "0.1.0"
   });
 
-  mcpServer.registerTool(
-    "run_shell",
+	  mcpServer.registerTool(
+	    "run_shell",
     {
       title: "Run Workspace Shell",
       description: MCP_RUN_SHELL_DESCRIPTION,
       inputSchema: {
-        command: z
-          .string()
-          .min(1)
-          .describe(
-            "One or more sandbox commands in the AI Meditations document DSL. Start new sessions with workspace_health for a capped entropy snapshot. For writes, use heredoc: write path.md <<EOF\\ncontent\\nEOF or <<'EOF'. patch accepts git-style unified diff bodies and also legacy JSON exact replacements; run help patch for examples. Pick a delimiter not present alone in the body; if content contains literal EOF lines, use DOC or another unique delimiter. Each command starts on its own line; inline content after a file path is rejected. Multi-command write batches roll back on execution failure. For structure use inspect_doc/toc/section; for section edits run help replace_section."
-          ),
+	        command: z
+	          .string()
+	          .min(1)
+	          .describe(
+	            "One or more sandbox commands in the AI Meditations document DSL. This is not bash. Start new sessions with workspace_health for a capped entropy snapshot. For large JSON/CLI content, prefer write_file or patch_file. For DSL writes, use heredoc: write path.md <<EOF\\ncontent\\nEOF or <<'EOF'. patch accepts git-style unified diff bodies and legacy JSON exact replacements; run help patch for examples. Pick a delimiter not present alone in the body. Each command starts on its own line; inline content after a file path is rejected. Multi-command write batches roll back on execution failure. For structure use inspect_doc/toc/section; for section edits run help replace_section."
+	          ),
         cwd: z.string().optional().describe("Optional workspace-relative current directory. Absolute paths and .. are not allowed.")
       },
       outputSchema: {
@@ -1561,7 +1581,7 @@ function createMcpServer(authContext: McpAuthContext) {
     async ({ command, cwd }) => {
       const result = await sandbox.run(command, {
         cwd,
-        scope: "write",
+        scope: mcpScopesToSandboxScope(authContext.scopes),
         actor: { actorType: "mcp_token", actorId: authContext.actorId }
       });
 
@@ -1578,6 +1598,102 @@ function createMcpServer(authContext: McpAuthContext) {
         },
         isError: !result.ok
       };
+    }
+	  );
+
+  mcpServer.registerTool(
+    "write_file",
+    {
+      title: "Write Workspace File",
+      description:
+        "Structured file write for MCP clients. Use this instead of run_shell heredocs when sending large content through JSON or CLI adapters. This is still sandboxed: paths are workspace-relative, absolute paths and .. are rejected, and write scope is required.",
+      inputSchema: {
+        path: z.string().min(1).describe("Workspace-relative destination path, for example docs/example/README.md."),
+        content: z.string().optional().describe("UTF-8 text content to write or append. Provide exactly one of content or content_base64."),
+        content_base64: z
+          .string()
+          .optional()
+          .describe("Base64-encoded UTF-8 content. Useful when external CLI/JSON quoting makes multiline content awkward."),
+        mode: z.enum(["write", "append"]).optional().describe("write replaces the file; append adds content to the end. Defaults to write."),
+        cwd: z.string().optional().describe("Optional workspace-relative current directory. Absolute paths and .. are not allowed.")
+      },
+      outputSchema: {
+        ok: z.boolean(),
+        stdout: z.string(),
+        stderr: z.string(),
+        errorType: z.string().optional(),
+        cwd: z.string(),
+        operation: z.string(),
+        path: z.string(),
+        mode: z.string(),
+        truncated: z.boolean()
+      },
+      annotations: {
+        title: "Write Workspace File",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      }
+    },
+    async ({ path: targetPath, content, content_base64, mode = "write", cwd }) => {
+      const operation = `write_file ${targetPath}`;
+      const decoded = decodeStructuredFileContent(content, content_base64);
+      if (!decoded.ok) {
+        return mcpSandboxResult(operation, sandboxErrorResult(decoded.error, cwd), { path: targetPath, mode });
+      }
+
+      const result = await sandbox.writeTextFile(targetPath, decoded.content, {
+        cwd,
+        mode,
+        scope: mcpScopesToSandboxScope(authContext.scopes),
+        actor: { actorType: "mcp_token", actorId: authContext.actorId }
+      });
+      return mcpSandboxResult(operation, result, { path: targetPath, mode });
+    }
+  );
+
+  mcpServer.registerTool(
+    "patch_file",
+    {
+      title: "Patch Workspace File",
+      description:
+        "Structured exact-text patch for MCP clients. Use this instead of run_shell JSON patch heredocs when old_text/new_text can be passed as normal JSON fields. The patch must match exactly one location unless dry_run is true, and write scope is required.",
+      inputSchema: {
+        path: z.string().min(1).describe("Workspace-relative file path to patch."),
+        old_text: z.string().min(1).describe("Exact text to replace. Include enough surrounding context to match exactly once."),
+        new_text: z.string().describe("Replacement text."),
+        dry_run: z.boolean().optional().describe("Preview the patch without writing."),
+        cwd: z.string().optional().describe("Optional workspace-relative current directory. Absolute paths and .. are not allowed.")
+      },
+      outputSchema: {
+        ok: z.boolean(),
+        stdout: z.string(),
+        stderr: z.string(),
+        errorType: z.string().optional(),
+        cwd: z.string(),
+        operation: z.string(),
+        path: z.string(),
+        dryRun: z.boolean(),
+        truncated: z.boolean()
+      },
+      annotations: {
+        title: "Patch Workspace File",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      }
+    },
+    async ({ path: targetPath, old_text, new_text, dry_run = false, cwd }) => {
+      const operation = `patch_file ${targetPath}`;
+      const result = await sandbox.patchTextFile(targetPath, old_text, new_text, {
+        cwd,
+        dryRun: dry_run,
+        scope: mcpScopesToSandboxScope(authContext.scopes),
+        actor: { actorType: "mcp_token", actorId: authContext.actorId }
+      });
+      return mcpSandboxResult(operation, result, { path: targetPath, dryRun: dry_run });
     }
   );
 
@@ -2140,6 +2256,53 @@ function formatMcpShellResult(command: string, result: SandboxCommandResult) {
   if (result.truncated) lines.push("truncated: true");
 
   return [...lines, "", output].join("\n");
+}
+
+function mcpSandboxResult(operation: string, result: SandboxCommandResult, extra: Record<string, unknown> = {}) {
+  return {
+    content: [{ type: "text" as const, text: formatMcpShellResult(operation, result) }],
+    structuredContent: {
+      ok: result.ok,
+      stdout: result.stdout,
+      stderr: result.stderr ?? "",
+      errorType: result.errorType,
+      cwd: result.cwd,
+      operation,
+      truncated: Boolean(result.truncated),
+      ...extra
+    },
+    isError: !result.ok
+  };
+}
+
+function sandboxErrorResult(message: string, cwd = "."): SandboxCommandResult {
+  return {
+    ok: false,
+    stdout: "",
+    stderr: message,
+    errorType: "validation_error",
+    cwd
+  };
+}
+
+function decodeStructuredFileContent(content: string | undefined, contentBase64: string | undefined):
+  | { ok: true; content: string }
+  | { ok: false; error: string } {
+  const hasContent = content !== undefined;
+  const hasBase64 = contentBase64 !== undefined;
+  if (hasContent === hasBase64) return { ok: false, error: "Provide exactly one of content or content_base64." };
+  if (hasContent) return { ok: true, content };
+
+  const normalizedBase64 = (contentBase64 ?? "").replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalizedBase64) || normalizedBase64.length % 4 === 1) {
+    return { ok: false, error: "content_base64 must be valid standard base64 text." };
+  }
+
+  try {
+    return { ok: true, content: Buffer.from(normalizedBase64, "base64").toString("utf8") };
+  } catch {
+    return { ok: false, error: "content_base64 must be valid base64-encoded UTF-8 text." };
+  }
 }
 
 function normalizeMcpRequestHeaders(req: http.IncomingMessage) {
@@ -2889,7 +3052,8 @@ async function getOrCreateGoogleUserContext(googleSub: string, email: string) {
 }
 
 async function workspaceContext(user: UserRecord, workspace: WorkspaceRecord): Promise<WorkspaceContext> {
-  if (user.status !== "active") throw new Error("user is disabled");
+  if (user.status !== "active") throw new AuthzError("user is disabled");
+  assertWorkspaceBelongsToUser(user, workspace);
   return {
     user,
     workspace,
@@ -2933,12 +3097,7 @@ async function mcpBearerAuthContext(authHeader: string): Promise<McpAuthContext 
 
   const tokenRow = systemStore.getActiveMcpTokenByTokenHash(hash);
   if (tokenRow) {
-    const context = await workspaceContext(systemStore.getUserById(tokenRow.userId), systemStore.getWorkspaceById(tokenRow.workspaceId));
-    return {
-      ...context,
-      actorId: tokenRow.id,
-      scopes: tokenRow.scopes
-    };
+    return mcpAuthContextFromTokenRecord(tokenRow.userId, tokenRow.workspaceId, tokenRow.id, tokenRow.scopes);
   }
 
   if (constantTimeEqual(token, config.mcpToken)) {
@@ -2959,12 +3118,21 @@ async function mcpBearerAuthContext(authHeader: string): Promise<McpAuthContext 
     return undefined;
   }
 
-  const context = await workspaceContext(systemStore.getUserById(record.userId), systemStore.getWorkspaceById(record.workspaceId));
-  return {
-    ...context,
-    actorId: record.clientId,
-    scopes: record.scope
-  };
+  return mcpAuthContextFromTokenRecord(record.userId, record.workspaceId, record.clientId, record.scope);
+}
+
+async function mcpAuthContextFromTokenRecord(userId: string, workspaceId: string, actorId: string, scopes: string): Promise<McpAuthContext | undefined> {
+  try {
+    const context = await workspaceContext(systemStore.getUserById(userId), systemStore.getWorkspaceById(workspaceId));
+    return {
+      ...context,
+      actorId,
+      scopes
+    };
+  } catch (error) {
+    if (error instanceof AuthzError) return undefined;
+    throw error;
+  }
 }
 
 async function loadOAuthState() {
@@ -3428,4 +3596,32 @@ function parseCsvList(value: string | undefined) {
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
+}
+
+function assertProductionSecurityConfig() {
+  if (isLocalBaseUrl(config.baseUrl)) return;
+
+  const problems: string[] = [];
+  if (!config.adminPassword || config.adminPassword === "local_dev_password") {
+    problems.push("ADMIN_PASSWORD is empty or using the development default");
+  }
+  if (!config.mcpToken || config.mcpToken === "local-dev-mcp-token") {
+    problems.push("MCP_TOKEN is empty or using the development default");
+  }
+  if (!config.tokenEncryptionSecret || config.tokenEncryptionSecret === "local-dev-token-encryption-secret") {
+    problems.push("TOKEN_ENCRYPTION_SECRET is empty or using the development default");
+  }
+
+  if (problems.length) {
+    throw new Error(`Refusing to start with insecure production config: ${problems.join("; ")}`);
+  }
+}
+
+function isLocalBaseUrl(rawUrl: string) {
+  try {
+    const hostname = new URL(rawUrl).hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
 }

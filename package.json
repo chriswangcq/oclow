@@ -10,8 +10,8 @@
   "scripts": {
     "dev": "npm run dev -w @ai-meditations/server",
     "build": "npm run build -w @ai-meditations/shared && npm run build -w @ai-meditations/sandbox && npm run build -w @ai-meditations/server",
-    "typecheck": "npm run build -w @ai-meditations/shared && npm run typecheck -w @ai-meditations/sandbox && npm run typecheck -w @ai-meditations/server",
-    "test": "npm run build -w @ai-meditations/shared && npm run test -w @ai-meditations/sandbox",
+    "typecheck": "npm run build -w @ai-meditations/shared && npm run build -w @ai-meditations/sandbox && npm run typecheck -w @ai-meditations/server",
+    "test": "npm run build -w @ai-meditations/shared && npm run test -w @ai-meditations/sandbox && npm run test -w @ai-meditations/server",
     "smoke:mcp": "node apps/server/scripts/mcp-smoke-test.mjs"
   },
   "devDependencies": {

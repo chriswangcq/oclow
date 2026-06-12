@@ -83,6 +83,8 @@ await check("lists expected MCP tools", async () => {
   const response = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, { sessionId });
   const names = response.body.result.tools.map((tool) => tool.name);
   assert.ok(names.includes("run_shell"));
+  assert.ok(names.includes("write_file"));
+  assert.ok(names.includes("patch_file"));
   assert.ok(names.includes("get_workspace_info"));
 });
 
@@ -190,6 +192,53 @@ await check("calls run_shell", async () => {
   assert.equal(response.body.result.structuredContent.cwd, ".");
 });
 
+await check("run_shell returns non-empty JSON responses repeatedly", async () => {
+  for (let index = 0; index < 3; index += 1) {
+    const response = await rpc(
+      {
+        jsonrpc: "2.0",
+        id: 50 + index,
+        method: "tools/call",
+        params: {
+          name: "run_shell",
+          arguments: { command: "help" }
+        }
+      },
+      { sessionId }
+    );
+    assert.ok(response.text.trim(), "Expected non-empty MCP response body");
+    assert.equal(response.body.result.structuredContent.ok, true);
+  }
+});
+
+await check("supports structured write_file and patch_file tools", async () => {
+  const filePath = `${smokeNamespace}/structured.md`;
+  const created = await callTool(sessionId, "write_file", {
+    path: filePath,
+    content_base64: Buffer.from("# Structured MCP Write\n\nhello from JSON\n", "utf8").toString("base64")
+  });
+  assert.equal(created.structuredContent.ok, true);
+  assert.equal(created.structuredContent.path, filePath);
+
+  const appended = await callTool(sessionId, "write_file", {
+    path: filePath,
+    mode: "append",
+    content: "\nappended from structured tool"
+  });
+  assert.equal(appended.structuredContent.ok, true);
+
+  const patched = await callTool(sessionId, "patch_file", {
+    path: filePath,
+    old_text: "hello from JSON\n\nappended from structured tool",
+    new_text: "hello from structured JSON"
+  });
+  assert.equal(patched.structuredContent.ok, true);
+
+  const read = await callRunShell(sessionId, `cat ${filePath}`);
+  assert.equal(read.structuredContent.ok, true);
+  assert.equal(read.structuredContent.stdout, "# Structured MCP Write\n\nhello from structured JSON");
+});
+
 await check("supports agent-friendly shell readers", async () => {
   const helpRg = await callRunShell(sessionId, "help rg");
   assert.equal(helpRg.structuredContent.ok, true);
@@ -212,7 +261,7 @@ await check("supports agent-friendly shell readers", async () => {
   assert.equal(numbered.structuredContent.ok, true);
   assert.match(numbered.structuredContent.stdout, /\s*1\t# AGENTS/);
 
-  const search = await callRunShell(sessionId, "rg -C 1 MCP AGENTS.md docs/ai-meditations");
+  const search = await callRunShell(sessionId, "rg -C 1 MCP AGENTS.md");
   assert.equal(search.structuredContent.ok, true);
   assert.match(search.structuredContent.stdout, /MCP/);
 
@@ -245,8 +294,8 @@ await check("supports document inspection and lint", async () => {
         "Same-document page.",
         "EOF",
         "",
-        `mkdir ${docPath}/child`,
-        `write ${docPath}/child/README.md <<'EOF'`,
+        `mkdir ${docPath}/sub_docs/child`,
+        `write ${docPath}/sub_docs/child/README.md <<'EOF'`,
         "---",
         "summary: Smoke-test child document.",
         "tags: [smoke]",
@@ -417,6 +466,7 @@ async function rpc(payload, options = {}) {
   const text = await response.text();
   const expectedStatus = options.expectedStatus ?? 200;
   assert.equal(response.status, expectedStatus, text);
+  if (expectedStatus === 200) assert.ok(text.trim(), "Expected non-empty MCP response body");
   return {
     text,
     sessionId: response.headers.get("mcp-session-id") ?? options.sessionId ?? "",
@@ -448,14 +498,18 @@ function resourceText(body) {
 }
 
 async function callRunShell(sessionId, command) {
+  return callTool(sessionId, "run_shell", { command });
+}
+
+async function callTool(sessionId, name, args) {
   const response = await rpc(
     {
       jsonrpc: "2.0",
       id: 500,
       method: "tools/call",
       params: {
-        name: "run_shell",
-        arguments: { command }
+        name,
+        arguments: args
       }
     },
     { sessionId }

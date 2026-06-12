@@ -71,7 +71,7 @@
           <p>After connecting, test with:</p>
           <pre><code>Please read AI Meditations get_workspace_info, then run help wiki.
 Tell me what sources/docs/journal/self mean in this workspace.</code></pre>
-          <p>A healthy connection exposes two tools: <code>get_workspace_info</code> and <code>run_shell</code>.</p>
+          <p>A healthy connection exposes <code>get_workspace_info</code>, <code>run_shell</code>, <code>write_file</code>, and <code>patch_file</code>.</p>
         </article>
       </section>
 
@@ -92,7 +92,15 @@ Tell me what sources/docs/journal/self mean in this workspace.</code></pre>
             </tr>
             <tr>
               <td><code>run_shell</code></td>
-              <td>Runs limited file commands such as <code>cat</code>, <code>tree</code>, <code>rg</code>, <code>append</code>, and <code>patch</code>.</td>
+              <td>Runs limited file commands such as <code>cat</code>, <code>tree</code>, <code>rg</code>, <code>inspect_doc</code>, and <code>lint_doc</code>. It is not bash.</td>
+            </tr>
+            <tr>
+              <td><code>write_file</code></td>
+              <td>Writes or appends text through JSON fields. Use it when CLI quoting makes heredocs awkward.</td>
+            </tr>
+            <tr>
+              <td><code>patch_file</code></td>
+              <td>Applies an exact <code>old_text</code> / <code>new_text</code> replacement through JSON fields.</td>
             </tr>
             <tr>
               <td><code>ai-meditations://llms.txt</code></td>

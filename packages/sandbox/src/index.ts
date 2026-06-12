@@ -273,6 +273,39 @@ export class WorkspaceSandbox {
     return lines.slice(start, end).join("\n");
   }
 
+  async writeTextFile(
+    virtualPath: string,
+    content: string,
+    options: RunOptions & { mode?: "write" | "append" } = {}
+  ): Promise<SandboxCommandResult> {
+    const cwd = this.normalizeVirtualPath(options.cwd ?? ".");
+    const mode = options.mode ?? "write";
+
+    try {
+      this.assertCommandAllowed(mode, options.scope ?? "read");
+      return this.result(await this.write(virtualPath, content, cwd, options, mode), cwd);
+    } catch (error) {
+      return this.errorResult(error, cwd);
+    }
+  }
+
+  async patchTextFile(
+    virtualPath: string,
+    oldText: string,
+    newText: string,
+    options: RunOptions & { dryRun?: boolean } = {}
+  ): Promise<SandboxCommandResult> {
+    const cwd = this.normalizeVirtualPath(options.cwd ?? ".");
+
+    try {
+      this.assertCommandAllowed("patch", options.scope ?? "read");
+      const args = options.dryRun ? ["--dry-run"] : [];
+      return this.result(await this.patch(virtualPath, JSON.stringify({ old_text: oldText, new_text: newText }), cwd, options, args), cwd);
+    } catch (error) {
+      return this.errorResult(error, cwd);
+    }
+  }
+
   async search(query: string, virtualPath = ".", cwd = ".", context = 0) {
     if (!query) throw new SandboxError("rg requires a query");
     if (!Number.isInteger(context) || context < 0 || context > 10) throw new SandboxError("rg context must be between 0 and 10");
@@ -1412,6 +1445,17 @@ export class WorkspaceSandbox {
       stdout: Buffer.from(stdout).subarray(0, this.options.outputLimitBytes).toString("utf8"),
       cwd,
       truncated: true
+    };
+  }
+
+  private errorResult(error: unknown, cwd: string): SandboxCommandResult {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      stdout: "",
+      stderr: message,
+      errorType: error instanceof SandboxError ? error.code.toLowerCase() : "internal_error",
+      cwd
     };
   }
 }

@@ -9,6 +9,7 @@ type AdminConfig = {
   workspacesRoot: string;
   legacyWorkspaceRoot: string;
   defaultScopes: string;
+  tokenEncryptionSecret: string;
 };
 
 type ParsedArgs = {
@@ -29,7 +30,8 @@ const config: AdminConfig = {
   systemRoot: configuredSystemRoot,
   workspacesRoot: configuredWorkspacesRoot,
   legacyWorkspaceRoot: configuredWorkspaceRoot,
-  defaultScopes: OAUTH_SCOPES.join(" ")
+  defaultScopes: OAUTH_SCOPES.join(" "),
+  tokenEncryptionSecret: process.env.TOKEN_ENCRYPTION_SECRET ?? process.env.SESSION_SECRET ?? process.env.MCP_TOKEN ?? "local-dev-token-encryption-secret"
 };
 
 await main();

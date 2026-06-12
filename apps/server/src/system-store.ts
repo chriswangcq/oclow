@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -56,6 +56,7 @@ export type SystemStoreConfig = {
   workspacesRoot: string;
   legacyWorkspaceRoot: string;
   defaultScopes: string;
+  tokenEncryptionSecret: string;
 };
 
 export type CreateManualUserInput = {
@@ -90,6 +91,7 @@ type DbMcpTokenRow = {
   id: string;
   token_hash: string;
   token: string;
+  token_ciphertext: string | null;
   user_id: string;
   workspace_id: string;
   name: string;
@@ -155,6 +157,7 @@ export class SystemStore {
         id TEXT PRIMARY KEY,
         token_hash TEXT NOT NULL UNIQUE,
         token TEXT NOT NULL,
+        token_ciphertext TEXT,
         user_id TEXT NOT NULL,
         workspace_id TEXT NOT NULL,
         name TEXT NOT NULL,
@@ -177,6 +180,8 @@ export class SystemStore {
       );
     `);
     this.ensureUserCredentialColumns();
+    this.ensureMcpTokenCiphertextColumn();
+    this.migratePlaintextMcpTokens();
   }
 
   ensureDefaultOwner(ownerEmail: string, legacyToken: string) {
@@ -360,19 +365,20 @@ export class SystemStore {
     const row = this.db.prepare(
       "SELECT * FROM mcp_tokens WHERE user_id = ? AND workspace_id = ? AND revoked_at IS NULL ORDER BY created_at ASC LIMIT 1"
     ).get(userId, workspaceId) as DbMcpTokenRow | undefined;
-    return row ? normalizeMcpTokenRow(row) : undefined;
+    return row ? normalizeMcpTokenRow(row, this.config.tokenEncryptionSecret, true) : undefined;
   }
 
   getActiveMcpTokenByTokenHash(hash: string) {
     const row = this.db.prepare(
       "SELECT * FROM mcp_tokens WHERE token_hash = ? AND revoked_at IS NULL"
     ).get(hash) as DbMcpTokenRow | undefined;
-    return row ? normalizeMcpTokenRow(row) : undefined;
+    return row ? normalizeMcpTokenRow(row, this.config.tokenEncryptionSecret, false) : undefined;
   }
 
   ensureActiveMcpToken(userId: string, workspaceId: string) {
     const user = this.getUserById(userId);
     if (user.status !== "active") throw new Error("user is disabled");
+    this.assertWorkspaceOwner(userId, workspaceId);
     const existing = this.getActiveMcpToken(userId, workspaceId);
     if (existing) return existing.token;
     return this.createMcpToken(userId, workspaceId, "default", this.config.defaultScopes).token;
@@ -392,11 +398,22 @@ export class SystemStore {
   }
 
   ensureMcpToken(userId: string, workspaceId: string, token: string, name: string, scopes: string) {
+    this.assertWorkspaceOwner(userId, workspaceId);
     const existing = this.db.prepare("SELECT id FROM mcp_tokens WHERE token_hash = ?").get(tokenHash(token)) as { id: string } | undefined;
     if (existing) return;
     this.db.prepare(
-      "INSERT INTO mcp_tokens (id, token_hash, token, user_id, workspace_id, name, scopes, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)"
-    ).run(`mcp_${randomBytes(10).toString("base64url")}`, tokenHash(token), token, userId, workspaceId, name, scopes, Date.now());
+      "INSERT INTO mcp_tokens (id, token_hash, token, token_ciphertext, user_id, workspace_id, name, scopes, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)"
+    ).run(
+      `mcp_${randomBytes(10).toString("base64url")}`,
+      tokenHash(token),
+      "",
+      encryptToken(token, this.config.tokenEncryptionSecret),
+      userId,
+      workspaceId,
+      name,
+      scopes,
+      Date.now()
+    );
   }
 
   saveWebSession(session: SaveWebSessionInput) {
@@ -425,8 +442,8 @@ export class SystemStore {
     const id = `mcp_${randomBytes(10).toString("base64url")}`;
     const createdAt = Date.now();
     this.db.prepare(
-      "INSERT INTO mcp_tokens (id, token_hash, token, user_id, workspace_id, name, scopes, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)"
-    ).run(id, tokenHash(token), token, userId, workspaceId, name, scopes, createdAt);
+      "INSERT INTO mcp_tokens (id, token_hash, token, token_ciphertext, user_id, workspace_id, name, scopes, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)"
+    ).run(id, tokenHash(token), "", encryptToken(token, this.config.tokenEncryptionSecret), userId, workspaceId, name, scopes, createdAt);
     return { id, token, userId, workspaceId, name, scopes, createdAt };
   }
 
@@ -445,9 +462,38 @@ export class SystemStore {
     addColumn("created_by", "created_by TEXT");
   }
 
+  private ensureMcpTokenCiphertextColumn() {
+    const rows = this.db.prepare("PRAGMA table_info(mcp_tokens)").all() as Array<{ name: string }>;
+    const columns = new Set(rows.map((row) => row.name));
+    if (!columns.has("token_ciphertext")) {
+      this.db.exec("ALTER TABLE mcp_tokens ADD COLUMN token_ciphertext TEXT");
+    }
+  }
+
+  private migratePlaintextMcpTokens() {
+    const rows = this.db.prepare("SELECT id, token, token_ciphertext FROM mcp_tokens").all() as Array<{
+      id: string;
+      token: string;
+      token_ciphertext: string | null;
+    }>;
+
+    for (const row of rows) {
+      if (!row.token || row.token_ciphertext) continue;
+      this.db.prepare("UPDATE mcp_tokens SET token = '', token_ciphertext = ? WHERE id = ?").run(
+        encryptToken(row.token, this.config.tokenEncryptionSecret),
+        row.id
+      );
+    }
+  }
+
   private emailBelongsToAnotherUser(email: string, userId: string) {
     const row = this.db.prepare("SELECT id FROM users WHERE email = ? AND id <> ?").get(normalizeEmail(email), userId) as { id: string } | undefined;
     return Boolean(row);
+  }
+
+  private assertWorkspaceOwner(userId: string, workspaceId: string) {
+    const workspace = this.getWorkspaceById(workspaceId);
+    if (workspace.userId !== userId) throw new Error("workspace does not belong to user");
   }
 
   private runInTransaction<T>(operation: () => T) {
@@ -489,6 +535,26 @@ export function tokenHash(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
+function encryptToken(token: string, secret: string) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", tokenEncryptionKey(secret), iv);
+  const ciphertext = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return ["v1", iv.toString("base64url"), tag.toString("base64url"), ciphertext.toString("base64url")].join(":");
+}
+
+function decryptToken(value: string, secret: string) {
+  const [version, iv, tag, ciphertext] = value.split(":");
+  if (version !== "v1" || !iv || !tag || !ciphertext) throw new Error("stored MCP token has an unsupported encryption format");
+  const decipher = createDecipheriv("aes-256-gcm", tokenEncryptionKey(secret), Buffer.from(iv, "base64url"));
+  decipher.setAuthTag(Buffer.from(tag, "base64url"));
+  return Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8");
+}
+
+function tokenEncryptionKey(secret: string) {
+  return createHash("sha256").update(secret).digest();
+}
+
 export function initialPasswordFromEmail(email: string) {
   return createHash("md5").update(normalizeEmail(email)).digest("hex").slice(-8);
 }
@@ -515,10 +581,10 @@ function normalizeWorkspaceRow(row: DbWorkspaceRow): WorkspaceRecord {
   };
 }
 
-function normalizeMcpTokenRow(row: DbMcpTokenRow): McpTokenRecord {
+function normalizeMcpTokenRow(row: DbMcpTokenRow, tokenEncryptionSecret: string, revealToken: boolean): McpTokenRecord {
   return {
     id: row.id,
-    token: row.token,
+    token: revealToken ? storedTokenValue(row, tokenEncryptionSecret) : "",
     userId: row.user_id,
     workspaceId: row.workspace_id,
     name: row.name,
@@ -526,6 +592,11 @@ function normalizeMcpTokenRow(row: DbMcpTokenRow): McpTokenRecord {
     createdAt: row.created_at,
     revokedAt: row.revoked_at ?? undefined
   };
+}
+
+function storedTokenValue(row: DbMcpTokenRow, tokenEncryptionSecret: string) {
+  if (row.token_ciphertext) return decryptToken(row.token_ciphertext, tokenEncryptionSecret);
+  return row.token;
 }
 
 function normalizeWebSessionRow(row: DbWebSessionRow): WebSessionRecord {

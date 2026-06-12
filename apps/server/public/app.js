@@ -28,6 +28,8 @@ const appView = $("#app");
 const filePreview = $("#file-preview");
 let eventsBound = false;
 const HOME_PATH = "docs";
+const DOCUMENT_URL_ROOT = "/docs";
+const JOURNAL_URL = "/journal";
 const CHILD_DOCUMENTS_DIRECTORY = "sub_docs";
 const LANGUAGE_LOCALES = {
   en: "en-US",
@@ -81,6 +83,8 @@ const I18N = {
     "empty.searchFailed": "Search failed.",
     "empty.loadingTitle": "Opening document",
     "empty.loadingCopy": "The document body and child documents will appear below.",
+    "empty.missingDocument": "Document not found",
+    "empty.missingDocumentCopy": "This URL is valid, but no document exists here yet.",
     "empty.noAudit": "No activity yet.",
     "empty.noBackups": "No local backups yet.",
     "sidebar.siblings": "Sibling documents",
@@ -194,6 +198,8 @@ const I18N = {
     "empty.searchFailed": "搜索失败。",
     "empty.loadingTitle": "正在展开文档",
     "empty.loadingCopy": "文档正文和子文档会显示在下方。",
+    "empty.missingDocument": "文档还不存在",
+    "empty.missingDocumentCopy": "这个地址是合法的文档地址，但当前还没有对应文档。",
     "empty.noAudit": "暂无日志。",
     "empty.noBackups": "暂无本地备份。",
     "sidebar.siblings": "同级文档",
@@ -346,7 +352,9 @@ async function boot() {
   bindEvents();
   applyStaticTranslations();
 
-  const bootstrap = await api(`/api/bootstrap?path=${encodeURIComponent(HOME_PATH)}`, { silent: true });
+  const initialRoute = routeFromLocation();
+  const bootstrapPath = initialRoute.view === "browse" ? initialRoute.path : HOME_PATH;
+  const bootstrap = await api(`/api/bootstrap?path=${encodeURIComponent(bootstrapPath)}`, { silent: true });
   state.authProviders = bootstrap?.providers ?? null;
   updateLoginProviders();
 
@@ -360,15 +368,19 @@ async function boot() {
   loginView.hidden = true;
   appView.hidden = false;
 
-  if (bootstrap.document) {
+  if (initialRoute.view === "timeline") {
+    await loadJournal();
+    setView("timeline");
+    syncAppUrl(JOURNAL_URL, "replace");
+  } else if (bootstrap.document) {
     const loadId = ++state.loadId;
     state.currentDir = bootstrap.document.path ?? HOME_PATH;
     renderPanelPath(state.currentDir);
     renderLoadedDocumentPackage(bootstrap.document, loadId);
+    syncDocumentUrl(bootstrap.document, "replace");
   } else {
-    await loadDirectory(HOME_PATH);
+    await loadDirectory(bootstrapPath, { history: "replace" });
   }
-  setView("browse");
 }
 
 function bindEvents() {
@@ -405,13 +417,23 @@ function bindEvents() {
   document.querySelectorAll(".nav button").forEach((button) => {
     button.addEventListener("click", async () => {
       if (button.dataset.root) {
-        await loadDirectory(button.dataset.root);
-        setView("browse");
+        await loadDirectory(button.dataset.root, { history: "push" });
         return;
       }
-      if (button.dataset.view === "timeline") await loadJournal();
+      if (button.dataset.view === "timeline") {
+        await showTimelineRoute({ history: "push" });
+        return;
+      }
       setView(button.dataset.view);
     });
+  });
+
+  window.addEventListener("popstate", () => {
+    if (loginView.hidden && !appView.hidden) {
+      void handleAppRoute({ history: "none" });
+    } else {
+      updateLoginProviders();
+    }
   });
 
   $("#top-search").addEventListener("click", () => openSearchPalette());
@@ -555,7 +577,88 @@ function bindEvents() {
 function updateLoginProviders() {
   const googleEnabled = Boolean(state.authProviders?.google?.enabled);
   $("#google-login").hidden = !googleEnabled;
+  $("#google-login").href = `/auth/google/start?return_to=${encodeURIComponent(currentReturnPath())}`;
   $("#login-divider").hidden = !googleEnabled;
+}
+
+async function handleAppRoute(options = {}) {
+  const route = routeFromLocation();
+  if (route.view === "timeline") {
+    await showTimelineRoute(options);
+    return;
+  }
+  await loadDirectory(route.path, options);
+}
+
+async function showTimelineRoute(options = {}) {
+  const history = options.history ?? "push";
+  await loadJournal();
+  setView("timeline");
+  if (history !== "none") syncAppUrl(JOURNAL_URL, history);
+}
+
+function routeFromLocation() {
+  const pathname = safeDecodePathname(location.pathname);
+  if (pathname === JOURNAL_URL || pathname.startsWith(`${JOURNAL_URL}/`)) {
+    return { view: "timeline" };
+  }
+  if (pathname === DOCUMENT_URL_ROOT || pathname.startsWith(`${DOCUMENT_URL_ROOT}/`)) {
+    return { view: "browse", path: workspacePathFromDocumentUrl(pathname) };
+  }
+  return { view: "browse", path: HOME_PATH };
+}
+
+function currentReturnPath() {
+  const route = routeFromLocation();
+  if (route.view === "timeline") return JOURNAL_URL;
+  return documentUrlFromWorkspacePath(route.path);
+}
+
+function safeDecodePathname(pathname) {
+  try {
+    return decodeURI(pathname);
+  } catch {
+    return pathname;
+  }
+}
+
+function workspacePathFromDocumentUrl(urlPath) {
+  const normalized = urlPath.replace(/^\/+|\/+$/g, "");
+  if (!normalized || normalized === "docs") return HOME_PATH;
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts[0] !== "docs") return HOME_PATH;
+  const documentSegments = parts.slice(1);
+  if (!documentSegments.length) return HOME_PATH;
+  if (documentSegments[0] === CHILD_DOCUMENTS_DIRECTORY) return parts.join("/");
+  return ["docs", ...documentSegments.flatMap((segment) => [CHILD_DOCUMENTS_DIRECTORY, segment])].join("/");
+}
+
+function documentUrlFromWorkspacePath(path) {
+  const normalized = normalizeDocumentPath(path);
+  if (normalized === HOME_PATH) return DOCUMENT_URL_ROOT;
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts[0] !== "docs") return DOCUMENT_URL_ROOT;
+  const visibleSegments = parts.slice(1).filter((part) => part !== CHILD_DOCUMENTS_DIRECTORY);
+  return `/${["docs", ...visibleSegments.map(encodeURIComponent)].join("/")}`;
+}
+
+function normalizeDocumentPath(path) {
+  const trimmed = String(path ?? "").split(/[?#]/, 1)[0].replace(/^\/+|\/+$/g, "") || HOME_PATH;
+  const lower = trimmed.toLowerCase();
+  if (lower === "readme.md") return HOME_PATH;
+  if (lower.endsWith("/readme.md")) return trimmed.slice(0, -"/README.md".length) || HOME_PATH;
+  return trimmed.replace(/\.(md|markdown)$/i, "") || HOME_PATH;
+}
+
+function syncDocumentUrl(documentPackage, history = "push") {
+  const url = documentPackage.urlPath || documentUrlFromWorkspacePath(documentPackage.path ?? state.currentDir);
+  syncAppUrl(url, history);
+}
+
+function syncAppUrl(url, history = "push") {
+  if (!url || (location.pathname === url && !location.search && !location.hash)) return;
+  const method = history === "replace" ? "replaceState" : "pushState";
+  window.history[method]({}, "", url);
 }
 
 function setView(view) {
@@ -711,7 +814,8 @@ function isTypingTarget(target) {
   return target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select";
 }
 
-async function loadDirectory(path = ".") {
+async function loadDirectory(path = HOME_PATH, options = {}) {
+  const history = options.history ?? "push";
   const loadId = ++state.loadId;
   state.currentDir = path;
   renderPanelPath(path);
@@ -720,6 +824,7 @@ async function loadDirectory(path = ".") {
   const data = await api(`/api/documents/package?path=${encodeURIComponent(path)}`);
   if (loadId !== state.loadId) return;
   renderLoadedDocumentPackage(data, loadId);
+  if (history !== "none") syncDocumentUrl(data, history);
 }
 
 function renderLoadedDocumentPackage(data, loadId = state.loadId) {
@@ -727,7 +832,7 @@ function renderLoadedDocumentPackage(data, loadId = state.loadId) {
   state.currentDir = path;
   renderPanelPath(path);
   renderSidebarNavigation(path, data.siblingDocuments ?? [], data.childDocuments ?? []);
-  openDocumentPackage(path, data.childDocuments ?? [], data.body ?? null, loadId);
+  openDocumentPackage(path, data.childDocuments ?? [], data.body ?? null, loadId, { exists: data.exists !== false });
 }
 
 function renderPanelPath(path) {
@@ -755,7 +860,7 @@ function renderPanelPath(path) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = crumb.label;
-    button.title = crumb.path;
+    button.title = documentUrlFromWorkspacePath(crumb.path);
     button.addEventListener("click", () => loadDirectory(crumb.path));
     container.append(button);
   }
@@ -868,8 +973,19 @@ function showLoadingPreview(path) {
   empty.querySelector("p").textContent = t("empty.loadingCopy");
 }
 
-function openDocumentPackage(path, childDocuments = [], body = null, loadId = state.loadId) {
+function openDocumentPackage(path, childDocuments = [], body = null, loadId = state.loadId, options = {}) {
   if (loadId !== state.loadId) return;
+  if (options.exists === false) {
+    state.currentMainPath = "";
+    filePreview.innerHTML = "";
+    setSourceChip(path);
+    $("#preview-empty").hidden = false;
+    $("#preview-doc").hidden = true;
+    $("#preview-empty").querySelector("h3").textContent = t("empty.missingDocument");
+    $("#preview-empty").querySelector("p").textContent = t("empty.missingDocumentCopy");
+    setView("browse");
+    return;
+  }
   if (!body && !childDocuments.length) {
     state.currentMainPath = "";
     filePreview.innerHTML = "";
@@ -877,6 +993,7 @@ function openDocumentPackage(path, childDocuments = [], body = null, loadId = st
     $("#preview-doc").hidden = true;
     $("#preview-empty").querySelector("h3").textContent = t(currentRootConfig().emptyTitleKey);
     $("#preview-empty").querySelector("p").textContent = t("empty.previewHint");
+    setView("browse");
     return;
   }
 

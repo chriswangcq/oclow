@@ -7,6 +7,7 @@ const AGENT_CONTEXT_ROOT = "self";
 const LEGACY_AGENT_CONTEXT_ROOT = "docs/self";
 const SOURCES_ROOT = "sources";
 const SYSTEM_DOCUMENT_PATHS = new Set([AGENT_CONTEXT_ROOT, LEGACY_AGENT_CONTEXT_ROOT]);
+const WORKSPACE_DOCUMENT_ROOT = "docs";
 const CHILD_DOCUMENTS_DIRECTORY = "sub_docs";
 const DOCUMENT_ATTACHMENTS_DIRECTORY = "_attachments";
 const DOCUMENT_AUXILIARY_DIRECTORIES = new Set([DOCUMENT_ATTACHMENTS_DIRECTORY, CHILD_DOCUMENTS_DIRECTORY]);
@@ -31,6 +32,8 @@ export type DocumentBody = {
 
 export type DocumentPackage = {
   path: string;
+  urlPath: string;
+  exists: boolean;
   entries: WorkspaceFileEntry[];
   siblingDocuments: ChildDocumentCard[];
   childDocuments: ChildDocumentCard[];
@@ -44,7 +47,19 @@ export async function buildDocumentPackage(
   documentPath: string,
   renderMarkdown: RenderMarkdown = renderWorkspaceFile
 ): Promise<DocumentPackage> {
-  const entries = await sandbox.listFiles(documentPath);
+  const entries = await sandbox.listFiles(documentPath).catch(() => null);
+  if (!entries) {
+    return {
+      path: documentPath,
+      urlPath: workspaceDocumentPathToUrlPath(documentPath),
+      exists: false,
+      entries: [],
+      siblingDocuments: await listSiblingDocumentCards(sandbox, documentPath).catch(() => []),
+      childDocuments: [],
+      body: null
+    };
+  }
+
   const [siblingDocuments, childDocuments, body] = await Promise.all([
     listSiblingDocumentCards(sandbox, documentPath),
     listChildDocumentCards(sandbox, documentPath),
@@ -52,11 +67,45 @@ export async function buildDocumentPackage(
   ]);
   return {
     path: documentPath,
+    urlPath: workspaceDocumentPathToUrlPath(documentPath),
+    exists: true,
     entries,
     siblingDocuments,
     childDocuments,
     body
   };
+}
+
+export function urlPathToWorkspaceDocumentPath(urlPath: string) {
+  const raw = urlPath.split(/[?#]/, 1)[0] ?? "";
+  const normalized = raw.replace(/^\/+|\/+$/g, "");
+  if (!normalized || normalized === WORKSPACE_DOCUMENT_ROOT) return WORKSPACE_DOCUMENT_ROOT;
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts[0] !== WORKSPACE_DOCUMENT_ROOT) return WORKSPACE_DOCUMENT_ROOT;
+
+  const documentSegments = parts.slice(1);
+  if (!documentSegments.length) return WORKSPACE_DOCUMENT_ROOT;
+  if (documentSegments[0] === CHILD_DOCUMENTS_DIRECTORY) return parts.join("/");
+  return [
+    WORKSPACE_DOCUMENT_ROOT,
+    ...documentSegments.flatMap((segment) => [CHILD_DOCUMENTS_DIRECTORY, segment])
+  ].join("/");
+}
+
+export function workspaceDocumentPathToUrlPath(workspacePath: string) {
+  const normalized = normalizeDocumentWorkspacePath(workspacePath);
+  if (normalized === WORKSPACE_DOCUMENT_ROOT) return `/${WORKSPACE_DOCUMENT_ROOT}`;
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts[0] !== WORKSPACE_DOCUMENT_ROOT) return `/${WORKSPACE_DOCUMENT_ROOT}`;
+  const visibleSegments = parts.slice(1).filter((part) => part !== CHILD_DOCUMENTS_DIRECTORY);
+  return `/${[WORKSPACE_DOCUMENT_ROOT, ...visibleSegments].map(encodeURIComponent).join("/")}`;
+}
+
+function normalizeDocumentWorkspacePath(workspacePath: string) {
+  const trimmed = workspacePath.split(/[?#]/, 1)[0]?.replace(/^\/+|\/+$/g, "") || WORKSPACE_DOCUMENT_ROOT;
+  if (trimmed.toLowerCase().endsWith("/readme.md")) return trimmed.slice(0, -"/README.md".length) || WORKSPACE_DOCUMENT_ROOT;
+  if (trimmed.toLowerCase() === "readme.md") return WORKSPACE_DOCUMENT_ROOT;
+  return trimmed.replace(/\.(md|markdown)$/i, "") || WORKSPACE_DOCUMENT_ROOT;
 }
 
 export async function listChildDocumentCards(sandbox: WorkspaceSandbox, parentPath: string): Promise<ChildDocumentCard[]> {

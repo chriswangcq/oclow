@@ -63,6 +63,8 @@ Supported agent tools include:
 
 - `get_workspace_info`: compact workspace map and current health snapshot.
 - `run_shell`: constrained document-workspace command interpreter.
+- `write_file`: structured write/append for MCP clients that struggle with heredoc escaping.
+- `patch_file`: structured exact text replacement with dry-run support.
 
 The shell is intentionally not a real OS shell. It supports safe document operations such as `rg`, `cat`, `tree`, `inspect_doc`, `toc`, `section`, `patch`, `replace_section`, `lint_doc`, and `workspace_health`.
 

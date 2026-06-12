@@ -107,6 +107,7 @@ const MCP_RUN_SHELL_DESCRIPTION = [
   "",
   "Reader contract:",
   "- Directory = document package; README.md = document body; sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
+  "- docs/ is the compiled-wiki collection root; direct docs/<slug>/ directories are top-level documents.",
   "- _attachments/ stores files that belong to the current document and is not a child document.",
   "- The physical directory tree is the source of truth for parent/child relationships; do not create hidden JSON indexes or ID-only folders unless the user explicitly asks.",
   "- Durable README.md files may use frontmatter: title, summary, tags, status. Status values: active, draft, reference, archived.",
@@ -235,6 +236,7 @@ const WORKSPACE_INFO_BASE_TEXT = [
   "## Reader Contract",
   "",
   "- Directory = document package; README.md = body; sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
+  "- `docs/` is the compiled-wiki collection root; direct `docs/<slug>/` directories are top-level documents.",
   "- _attachments/ stores files that belong to the current document and is not a child document.",
   "- The physical directory tree is the source of truth. Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
   "- Reader opens a directory as README.md plus sibling pages.",
@@ -610,6 +612,7 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "- Directory = document package.",
   "- README.md = main body of that document package.",
   "- Sibling .md files = pages in the same document.",
+  "- docs/<slug>/ directories are top-level documents under the compiled-wiki root.",
   "- sub_docs/<slug>/ directories = child documents.",
   "- _attachments/ = files that belong to the current document and are hidden from child-document navigation.",
   "- Use <parent>/sub_docs/<slug>/README.md for a child document.",
@@ -2507,7 +2510,12 @@ async function listChildDocumentCardsFromEntries(sandbox: WorkspaceSandbox, entr
 
 async function collectChildDocumentEntries(sandbox: WorkspaceSandbox, parentPath: string, entries: WorkspaceFileEntry[]) {
   const rows: WorkspaceFileEntry[] = [];
-  const subDocsPath = `${parentPath.replace(/\/+$/, "")}/${CHILD_DOCUMENTS_DIRECTORY}`.replace(/^\.\//, "");
+  const normalized = parentPath.replace(/\/+$/, "") || ".";
+  if (isDocumentRootPath(normalized)) {
+    rows.push(...entries.filter(isChildDocumentEntry));
+    return rows;
+  }
+  const subDocsPath = `${normalized}/${CHILD_DOCUMENTS_DIRECTORY}`.replace(/^\.\//, "");
   const hasSubDocs = entries.some((entry) => entry.kind === "directory" && entry.name === CHILD_DOCUMENTS_DIRECTORY);
   if (hasSubDocs) {
     const subDocEntries = await sandbox.listFiles(subDocsPath).catch(() => []);

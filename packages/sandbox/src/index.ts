@@ -1092,6 +1092,18 @@ export class WorkspaceSandbox {
 
   private async documentChildDirectories(virtualPath: string, abs: string, entries: Dirent[]) {
     const rows: Array<{ name: string; virtualPath: string; abs: string }> = [];
+    if (isDocumentCollectionRootPath(virtualPath)) {
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !isDocumentChildDirectoryName(entry.name)) continue;
+        rows.push({
+          name: entry.name,
+          virtualPath: toVirtualPath(path.posix.join(virtualPath, entry.name)),
+          abs: path.join(abs, entry.name)
+        });
+      }
+      return rows.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
     const container = entries.find((entry) => entry.isDirectory() && entry.name === CHILD_DOCUMENTS_DIRECTORY);
     if (container) {
       const containerAbs = path.join(abs, CHILD_DOCUMENTS_DIRECTORY);
@@ -1777,6 +1789,10 @@ function isDocumentChildDirectoryName(name: string) {
 function shouldPreferSubDocsContainer(virtualPath: string) {
   const canonical = canonicalWorkspacePath(virtualPath);
   return canonical.startsWith("docs/") && path.posix.basename(canonical) !== CHILD_DOCUMENTS_DIRECTORY;
+}
+
+function isDocumentCollectionRootPath(virtualPath: string) {
+  return canonicalWorkspacePath(virtualPath) === "docs";
 }
 
 function isNonDocumentContainerPath(virtualPath: string) {
@@ -2912,6 +2928,7 @@ function helpText(document?: string) {
       "- Directory = document package.",
       "- README.md = document body.",
       "- Sibling .md files = pages in the same document; Reader expands them after README.md.",
+      "- docs/<slug>/ directories are top-level documents under the compiled-wiki root.",
       "- sub_docs/<slug>/ directories = child documents; Reader shows them in navigation and as cards below the current document.",
       "- _attachments/ = files that belong to the current document; it is not a child document.",
       "- Document: docs/<slug>/README.md.",
@@ -3031,6 +3048,7 @@ function helpText(document?: string) {
     "",
     "Document conventions:",
     "- Directory = document package; README.md = body.",
+    "- docs/<slug>/ directories are top-level documents under the compiled-wiki root.",
     "- Sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
     "- _attachments/ stores files for the current document; it is not a child document.",
     "- The physical directory tree is the source of truth; do not create hidden JSON indexes unless the user asks.",

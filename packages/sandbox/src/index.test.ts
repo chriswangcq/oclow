@@ -408,6 +408,12 @@ assert.match(result.stdout, /status=reference/);
 assert.doesNotMatch(result.stdout, /_attachments/);
 assert.match(result.stdout, /recommended next commands/);
 
+result = await sandbox.run("inspect_doc docs");
+assert.equal(result.ok, true);
+assert.match(result.stdout, /child documents \(1\)/);
+assert.match(result.stdout, /docs\/pkg/);
+assert.doesNotMatch(result.stdout, /docs\/pkg is not a child document/);
+
 const fatPackageCommands = [
   "mkdir docs/fat",
   "write docs/fat/README.md <<'EOF'",

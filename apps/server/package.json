@@ -8,7 +8,7 @@
     "admin": "node dist/admin.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx src/authz.test.ts && tsx src/system-store.test.ts"
+    "test": "tsx src/authz.test.ts && tsx src/system-store.test.ts && tsx src/workspace-template.test.ts"
   },
   "dependencies": {
     "@ai-meditations/sandbox": "0.1.0",

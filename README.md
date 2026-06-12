@@ -16,7 +16,7 @@ Humans get a lightweight document reader. Agents get an MCP-accessible, file-bac
 Oclow treats directories as document packages:
 
 ```text
-docs/example/
+docs/sub_docs/example/
   README.md          # main page of this document package
   second-page.md     # another page in the same document package
   _attachments/      # files owned by this document; not a child document

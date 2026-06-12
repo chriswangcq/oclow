@@ -107,7 +107,7 @@ const MCP_RUN_SHELL_DESCRIPTION = [
   "",
   "Reader contract:",
   "- Directory = document package; README.md = document body; sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
-  "- docs/ is the compiled-wiki collection root; direct docs/<slug>/ directories are top-level documents.",
+  "- docs/ is the compiled-wiki root document; top-level documents live under docs/sub_docs/<slug>/.",
   "- _attachments/ stores files that belong to the current document and is not a child document.",
   "- The physical directory tree is the source of truth for parent/child relationships; do not create hidden JSON indexes or ID-only folders unless the user explicitly asks.",
   "- Durable README.md files may use frontmatter: title, summary, tags, status. Status values: active, draft, reference, archived.",
@@ -236,7 +236,7 @@ const WORKSPACE_INFO_BASE_TEXT = [
   "## Reader Contract",
   "",
   "- Directory = document package; README.md = body; sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
-  "- `docs/` is the compiled-wiki collection root; direct `docs/<slug>/` directories are top-level documents.",
+  "- `docs/` is the compiled-wiki root document; top-level documents live under `docs/sub_docs/<slug>/`.",
   "- _attachments/ stores files that belong to the current document and is not a child document.",
   "- The physical directory tree is the source of truth. Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
   "- Reader opens a directory as README.md plus sibling pages.",
@@ -280,8 +280,8 @@ const WORKSPACE_INFO_BASE_TEXT = [
   "- tree archive --depth 3",
   "- rg <keyword> docs sources self journal",
   "- rg -C 2 <keyword> docs sources self journal",
-  "- inspect_doc docs/<slug>",
-  "- lint_doc docs/<slug>",
+  "- inspect_doc docs/sub_docs/<slug>",
+  "- lint_doc docs/sub_docs/<slug>",
   "- toc docs/README.md",
   "- changes"
 ].join("\n");
@@ -391,7 +391,7 @@ const LLMS_TXT_RESOURCE_TEXT = [
   "tree journal --depth 3",
   "rg <keyword> docs sources self journal",
   "rg -C 2 <keyword> docs sources self journal",
-  "lint_doc docs/<slug>",
+  "lint_doc docs/sub_docs/<slug>",
   "```",
   "",
   "## Safety",
@@ -499,10 +499,10 @@ const WIKI_MAINTENANCE_SKILL_TEXT = [
   "tree sources --depth 3",
   "rg <keyword> docs sources journal",
   "rg -C 2 <keyword> docs sources journal",
-  "inspect_doc docs/<slug>",
-  "toc docs/<slug>/README.md",
-  "section docs/<slug>/README.md \"## Heading\"",
-  "lint_doc docs/<slug>",
+  "inspect_doc docs/sub_docs/<slug>",
+  "toc docs/sub_docs/<slug>/README.md",
+  "section docs/sub_docs/<slug>/README.md \"## Heading\"",
+  "lint_doc docs/sub_docs/<slug>",
   "changes",
   "nl docs/README.md",
   "diff docs/page.md <<EOF",
@@ -587,9 +587,9 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "Then inspect likely target packages before creating or moving anything:",
   "",
   "```text",
-  "inspect_doc docs/<slug>",
-  "toc docs/<slug>/README.md",
-  "lint_doc docs/<slug>",
+  "inspect_doc docs/sub_docs/<slug>",
+  "toc docs/sub_docs/<slug>/README.md",
+  "lint_doc docs/sub_docs/<slug>",
   "```",
   "",
   "## Classification Rules",
@@ -612,7 +612,7 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "- Directory = document package.",
   "- README.md = main body of that document package.",
   "- Sibling .md files = pages in the same document.",
-  "- docs/<slug>/ directories are top-level documents under the compiled-wiki root.",
+  "- docs/sub_docs/<slug>/ directories are top-level documents under the compiled-wiki root document.",
   "- sub_docs/<slug>/ directories = child documents.",
   "- _attachments/ = files that belong to the current document and are hidden from child-document navigation.",
   "- Use <parent>/sub_docs/<slug>/README.md for a child document.",
@@ -655,10 +655,10 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "Page-heavy document package:",
   "",
   "```text",
-  "inspect_doc docs/<slug>",
-  "lint_doc docs/<slug>",
-  "toc docs/<slug>/README.md",
-  "tree docs/<slug> --depth 2",
+  "inspect_doc docs/sub_docs/<slug>",
+  "lint_doc docs/sub_docs/<slug>",
+  "toc docs/sub_docs/<slug>/README.md",
+  "tree docs/sub_docs/<slug> --depth 2",
   "```",
   "",
   "Then move only durable independent subtopics into child documents. Keep small continuations as sibling pages or README sections.",
@@ -666,8 +666,8 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "Wrong-layer write:",
   "",
   "```text",
-  "lint_doc docs/<path-or-package>",
-  "inspect_doc docs/<parent>",
+  "lint_doc docs/sub_docs/<path-or-package>",
+  "inspect_doc docs/sub_docs/<parent>",
   "inspect_doc journal",
   "```",
   "",
@@ -676,7 +676,7 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "Broken link repair:",
   "",
   "```text",
-  "lint_doc docs/<slug>",
+  "lint_doc docs/sub_docs/<slug>",
   "rg \"link text or target\" docs sources journal",
   "patch <<'EOF'",
   "--- a/docs/<file>.md",
@@ -692,10 +692,10 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "Reader-card cleanup:",
   "",
   "```text",
-  "inspect_doc docs/<parent>",
+  "inspect_doc docs/sub_docs/<parent>",
   "patch <<'EOF'",
-  "--- a/docs/<child>/README.md",
-  "+++ b/docs/<child>/README.md",
+  "--- a/docs/sub_docs/<parent>/sub_docs/<child>/README.md",
+  "+++ b/docs/sub_docs/<parent>/sub_docs/<child>/README.md",
   "@@ -1,1 +1,6 @@",
   "+---",
   "+summary: One sentence.",
@@ -722,15 +722,15 @@ const ORGANIZE_WORKSPACE_SKILL_TEXT = [
   "Move a low-confidence document:",
   "",
   "```text",
-  "mv docs/<old-slug> archive/<reason>/<old-slug>",
+  "mv docs/sub_docs/<old-slug> archive/<reason>/<old-slug>",
   "```",
   "",
   "Add Reader card metadata:",
   "",
   "```text",
   "patch <<'EOF'",
-  "--- a/docs/<slug>/README.md",
-  "+++ b/docs/<slug>/README.md",
+  "--- a/docs/sub_docs/<slug>/README.md",
+  "+++ b/docs/sub_docs/<slug>/README.md",
   "@@ -1,1 +1,6 @@",
   "+---",
   "+summary: One sentence.",
@@ -1611,7 +1611,7 @@ function createMcpServer(authContext: McpAuthContext) {
       description:
         "Structured file write for MCP clients. Use this instead of run_shell heredocs when sending large content through JSON or CLI adapters. This is still sandboxed: paths are workspace-relative, absolute paths and .. are rejected, and write scope is required.",
       inputSchema: {
-        path: z.string().min(1).describe("Workspace-relative destination path, for example docs/example/README.md."),
+        path: z.string().min(1).describe("Workspace-relative destination path, for example docs/sub_docs/example/README.md."),
         content: z.string().optional().describe("UTF-8 text content to write or append. Provide exactly one of content or content_base64."),
         content_base64: z
           .string()
@@ -2511,10 +2511,6 @@ async function listChildDocumentCardsFromEntries(sandbox: WorkspaceSandbox, entr
 async function collectChildDocumentEntries(sandbox: WorkspaceSandbox, parentPath: string, entries: WorkspaceFileEntry[]) {
   const rows: WorkspaceFileEntry[] = [];
   const normalized = parentPath.replace(/\/+$/, "") || ".";
-  if (isDocumentRootPath(normalized)) {
-    rows.push(...entries.filter(isChildDocumentEntry));
-    return rows;
-  }
   const subDocsPath = `${normalized}/${CHILD_DOCUMENTS_DIRECTORY}`.replace(/^\.\//, "");
   const hasSubDocs = entries.some((entry) => entry.kind === "directory" && entry.name === CHILD_DOCUMENTS_DIRECTORY);
   if (hasSubDocs) {
@@ -2690,8 +2686,17 @@ function displayEntryName(entry: WorkspaceFileEntry) {
 
 function pageDisplayPath(documentPath: string) {
   if (!documentPath || documentPath === ".") return "Workspace";
-  if (documentPath.toLowerCase().endsWith("/readme.md")) return documentPath.slice(0, -"/README.md".length);
-  return documentPath.replace(/\.(md|markdown)$/i, "");
+  const pathWithoutExtension = documentPath.toLowerCase().endsWith("/readme.md")
+    ? documentPath.slice(0, -"/README.md".length)
+    : documentPath.replace(/\.(md|markdown)$/i, "");
+  return humanDisplayPath(pathWithoutExtension);
+}
+
+function humanDisplayPath(documentPath: string) {
+  return documentPath
+    .split("/")
+    .filter((part) => part && part !== CHILD_DOCUMENTS_DIRECTORY)
+    .join("/") || ".";
 }
 
 function titleFromPath(documentPath: string) {

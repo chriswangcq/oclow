@@ -641,7 +641,7 @@ export class WorkspaceSandbox {
     }
 
     if (virtualPath === "docs" && markdownPages.length > 0) {
-      warnings.push("docs root has sibling Markdown pages; durable top-level subjects usually belong in docs/<slug>/README.md");
+      warnings.push("docs root has sibling Markdown pages; durable top-level subjects usually belong in docs/sub_docs/<slug>/README.md");
     }
 
     return {
@@ -741,8 +741,8 @@ export class WorkspaceSandbox {
           "patch body must be either a unified diff or JSON with string old_text and new_text.",
           "Preferred unified diff example:",
           "patch <<'EOF'",
-          "--- a/docs/example/README.md",
-          "+++ b/docs/example/README.md",
+          "--- a/docs/sub_docs/example/README.md",
+          "+++ b/docs/sub_docs/example/README.md",
           "@@ -1,3 +1,3 @@",
           " # Example",
           "-old text",
@@ -750,7 +750,7 @@ export class WorkspaceSandbox {
           "EOF",
           "",
           "Legacy JSON example:",
-          "patch docs/example/README.md <<'EOF'",
+          "patch docs/sub_docs/example/README.md <<'EOF'",
           "{\"old_text\":\"# Old\\n\\nText\",\"new_text\":\"# New\\n\\nText with \\\"quotes\\\"\"}",
           "EOF",
           "",
@@ -1092,18 +1092,6 @@ export class WorkspaceSandbox {
 
   private async documentChildDirectories(virtualPath: string, abs: string, entries: Dirent[]) {
     const rows: Array<{ name: string; virtualPath: string; abs: string }> = [];
-    if (isDocumentCollectionRootPath(virtualPath)) {
-      for (const entry of entries) {
-        if (!entry.isDirectory() || !isDocumentChildDirectoryName(entry.name)) continue;
-        rows.push({
-          name: entry.name,
-          virtualPath: toVirtualPath(path.posix.join(virtualPath, entry.name)),
-          abs: path.join(abs, entry.name)
-        });
-      }
-      return rows.sort((a, b) => a.name.localeCompare(b.name));
-    }
-
     const container = entries.find((entry) => entry.isDirectory() && entry.name === CHILD_DOCUMENTS_DIRECTORY);
     if (container) {
       const containerAbs = path.join(abs, CHILD_DOCUMENTS_DIRECTORY);
@@ -1788,11 +1776,7 @@ function isDocumentChildDirectoryName(name: string) {
 
 function shouldPreferSubDocsContainer(virtualPath: string) {
   const canonical = canonicalWorkspacePath(virtualPath);
-  return canonical.startsWith("docs/") && path.posix.basename(canonical) !== CHILD_DOCUMENTS_DIRECTORY;
-}
-
-function isDocumentCollectionRootPath(virtualPath: string) {
-  return canonicalWorkspacePath(virtualPath) === "docs";
+  return (canonical === "docs" || canonical.startsWith("docs/")) && path.posix.basename(canonical) !== CHILD_DOCUMENTS_DIRECTORY;
 }
 
 function isNonDocumentContainerPath(virtualPath: string) {
@@ -2616,7 +2600,7 @@ function helpText(document?: string) {
       "Choose a delimiter that does not appear alone in the body. If Markdown content contains literal EOF lines, use a different delimiter such as DOC.",
       "",
       "Example document package README:",
-      "write docs/example/README.md <<EOF",
+      "write docs/sub_docs/example/README.md <<EOF",
       "---",
       "title: Example",
       "summary: What this document is for.",
@@ -2647,7 +2631,7 @@ function helpText(document?: string) {
       "status: settled",
       "tags: [example]",
       "links:",
-      "- docs/example/README.md",
+      "- docs/sub_docs/example/README.md",
       "",
       "- What happened",
       "- What changed",
@@ -2668,8 +2652,8 @@ function helpText(document?: string) {
       "",
       "Preferred git/unified diff example:",
       "patch <<'EOF'",
-      "--- a/docs/example/README.md",
-      "+++ b/docs/example/README.md",
+      "--- a/docs/sub_docs/example/README.md",
+      "+++ b/docs/sub_docs/example/README.md",
       "@@ -1,3 +1,3 @@",
       " # Example",
       " ",
@@ -2678,7 +2662,7 @@ function helpText(document?: string) {
       "EOF",
       "",
       "Hunk-only example for one explicit file:",
-      "patch docs/example/README.md <<'EOF'",
+      "patch docs/sub_docs/example/README.md <<'EOF'",
       "@@ -1,3 +1,3 @@",
       " # Example",
       " ",
@@ -2687,12 +2671,12 @@ function helpText(document?: string) {
       "EOF",
       "",
       "Legacy JSON example:",
-      "patch docs/example/README.md <<'EOF'",
+      "patch docs/sub_docs/example/README.md <<'EOF'",
       "{\"old_text\":\"old text\",\"new_text\":\"new text\"}",
       "EOF",
       "",
       "Legacy JSON multiline example:",
-      "patch docs/example/README.md <<'EOF'",
+      "patch docs/sub_docs/example/README.md <<'EOF'",
       "{\"old_text\":\"# Old\\n\\nParagraph\",\"new_text\":\"# New\\n\\nParagraph with \\\"quotes\\\"\"}",
       "EOF",
       "",
@@ -2744,10 +2728,10 @@ function helpText(document?: string) {
       `Usage: ${command} <file> [count]`,
       "",
       "Examples:",
-      `${command} docs/example/README.md`,
-      `${command} docs/example/README.md 5`,
-      `${command} -n 5 docs/example/README.md`,
-      `${command} docs/example/README.md --lines 5`,
+      `${command} docs/sub_docs/example/README.md`,
+      `${command} docs/sub_docs/example/README.md 5`,
+      `${command} -n 5 docs/sub_docs/example/README.md`,
+      `${command} docs/sub_docs/example/README.md --lines 5`,
       "",
       "Notes:",
       "- Default line count is 20.",
@@ -2761,9 +2745,9 @@ function helpText(document?: string) {
       "cat reads a file. nl reads a file with line numbers.",
       "",
       "Examples:",
-      "cat docs/example/README.md",
-      "cat -n docs/example/README.md",
-      "nl docs/example/README.md",
+      "cat docs/sub_docs/example/README.md",
+      "cat -n docs/sub_docs/example/README.md",
+      "nl docs/sub_docs/example/README.md",
       "",
       "Use numbered output when preparing an exact patch or pointing the user to a specific line."
     ].join("\n");
@@ -2816,9 +2800,9 @@ function helpText(document?: string) {
       "",
       "Usage:",
       "inspect_doc docs",
-      "inspect_doc docs/example",
-      "inspect_doc docs/example/README.md",
-      "inspect_doc docs/example/second-page.md",
+      "inspect_doc docs/sub_docs/example",
+      "inspect_doc docs/sub_docs/example/README.md",
+      "inspect_doc docs/sub_docs/example/second-page.md",
       "",
       "It returns:",
       "- whether the target is a document package, same-document page, or file",
@@ -2840,7 +2824,7 @@ function helpText(document?: string) {
       "Usage:",
       "workspace_health",
       "workspace_health docs",
-      "workspace_health docs/<slug> --limit 120",
+      "workspace_health docs/sub_docs/<slug> --limit 120",
       "",
       "It scans docs/, sources/, self/, journal/, AGENTS.md, and index.md by default.",
       "It reports severity totals plus the top [error], [warn], and [info] signals from lint_doc-style checks.",
@@ -2889,7 +2873,7 @@ function helpText(document?: string) {
       "Examples:",
       "lint_stale_append docs/page.md",
       "lint_doc docs/page.md",
-      "lint_doc docs/example",
+      "lint_doc docs/sub_docs/example",
       "lint_doc docs/page.md --stale-next-steps",
       "",
       "lint_doc reports:",
@@ -2928,10 +2912,10 @@ function helpText(document?: string) {
       "- Directory = document package.",
       "- README.md = document body.",
       "- Sibling .md files = pages in the same document; Reader expands them after README.md.",
-      "- docs/<slug>/ directories are top-level documents under the compiled-wiki root.",
+      "- docs/sub_docs/<slug>/ directories are top-level documents under the compiled-wiki root document.",
       "- sub_docs/<slug>/ directories = child documents; Reader shows them in navigation and as cards below the current document.",
       "- _attachments/ = files that belong to the current document; it is not a child document.",
-      "- Document: docs/<slug>/README.md.",
+      "- Document: docs/sub_docs/<slug>/README.md.",
       "- Child document: <parent>/sub_docs/<slug>/README.md.",
       "- Same-document page: <parent>/<page>.md.",
       "",
@@ -3006,10 +2990,10 @@ function helpText(document?: string) {
       "- Use lint_doc <path> after edits to catch wrong-layer writes, broken links, and Reader-card issues.",
       "",
       "Useful commands:",
-      "inspect_doc docs/<slug>",
-      "toc docs/<slug>/README.md",
-      "section docs/<slug>/README.md \"## Heading\"",
-      "lint_doc docs/<slug>",
+      "inspect_doc docs/sub_docs/<slug>",
+      "toc docs/sub_docs/<slug>/README.md",
+      "section docs/sub_docs/<slug>/README.md \"## Heading\"",
+      "lint_doc docs/sub_docs/<slug>",
       "",
       "MCP resource:",
       "ai-meditations://skills/wiki-maintenance"
@@ -3048,7 +3032,7 @@ function helpText(document?: string) {
     "",
     "Document conventions:",
     "- Directory = document package; README.md = body.",
-    "- docs/<slug>/ directories are top-level documents under the compiled-wiki root.",
+    "- docs/sub_docs/<slug>/ directories are top-level documents under the compiled-wiki root document.",
     "- Sibling .md files = pages; sub_docs/<slug>/ directories = child documents.",
     "- _attachments/ stores files for the current document; it is not a child document.",
     "- The physical directory tree is the source of truth; do not create hidden JSON indexes unless the user asks.",

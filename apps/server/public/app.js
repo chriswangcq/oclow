@@ -29,6 +29,7 @@ const appView = $("#app");
 const filePreview = $("#file-preview");
 let eventsBound = false;
 const HOME_PATH = "docs";
+const CHILD_DOCUMENTS_DIRECTORY = "sub_docs";
 const LANGUAGE_LOCALES = {
   en: "en-US",
   zh: "zh-CN"
@@ -795,6 +796,7 @@ function panelPathCrumbs(path) {
   let cursor = rootConfig ? root : "";
   for (const part of displayPath.split("/").filter(Boolean)) {
     cursor = cursor ? `${cursor}/${part}` : part;
+    if (part === CHILD_DOCUMENTS_DIRECTORY) continue;
     crumbs.push({ label: part, path: cursor });
   }
   return crumbs;
@@ -1102,7 +1104,7 @@ function renderJournalTimeline() {
       ${block.excerpt ? `<p>${escapeHtml(block.excerpt)}</p>` : ""}
       ${renderTimelineMeta(block)}
       <div class="timeline-item-foot">
-        <span class="path-chip">${escapeHtml(block.sourcePath)}:${block.line}</span>
+        <span class="path-chip" title="${escapeHtml(block.sourcePath)}:${block.line}">${escapeHtml(humanDisplayPath(block.sourcePath))}:${block.line}</span>
         <button class="ghost small" type="button" data-open-source="${escapeHtml(block.sourcePath)}">${escapeHtml(t("timeline.open"))}</button>
       </div>
     `;
@@ -1389,7 +1391,7 @@ function selectPage(path) {
 
 function setSourceChip(path) {
   const chip = $("#current-path-file");
-  chip.textContent = path || "";
+  chip.textContent = path ? humanDisplayPath(path) : "";
   chip.title = path || "";
 }
 
@@ -1408,8 +1410,17 @@ function scrollPageIntoView(target) {
 
 function pageDisplayPath(path) {
   if (!path || path === ".") return t("root.workspace");
-  if (path.toLowerCase().endsWith("/readme.md")) return path.slice(0, -"/README.md".length);
-  return path.replace(/\.md$/i, "");
+  const pathWithoutExtension = path.toLowerCase().endsWith("/readme.md")
+    ? path.slice(0, -"/README.md".length)
+    : path.replace(/\.md$/i, "");
+  return humanDisplayPath(pathWithoutExtension);
+}
+
+function humanDisplayPath(path) {
+  return path
+    .split("/")
+    .filter((part) => part && part !== CHILD_DOCUMENTS_DIRECTORY)
+    .join("/") || ".";
 }
 
 function rootSegment(path) {

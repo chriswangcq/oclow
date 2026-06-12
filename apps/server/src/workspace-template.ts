@@ -35,11 +35,12 @@ export async function ensureDefaultWorkspace(root: string) {
       "",
       "This is the compiled wiki root and human-facing document index.",
       "",
-      "Use a top-level directory for each durable document, product area, concept, entity, or long-running thread.",
+      "Use `docs/sub_docs/<slug>/` for each durable document, product area, concept, entity, or long-running thread.",
       "",
       "Document packages follow the Reader rendering contract:",
       "",
-      "- `docs/<slug>/` directories are top-level documents under this compiled-wiki root.",
+      "- `docs/` is the compiled-wiki root document.",
+      "- `docs/sub_docs/<slug>/` directories are top-level documents under this root.",
       "- A directory is a document package.",
       "- `README.md` is the document body.",
       "- Sibling `.md` files are pages in the same document.",
@@ -148,18 +149,18 @@ async function migrateAgentContextRoot(root: string) {
 async function migrateChildDocumentsToSubDocs(root: string) {
   for (const docsRootName of ["docs", "topics"]) {
     const docsRoot = path.join(root, docsRootName);
-    if (await pathExists(docsRoot)) await migrateDocumentPackageChildren(docsRoot, true);
+    if (await pathExists(docsRoot)) await migrateDocumentPackageChildren(docsRoot);
   }
 }
 
-async function migrateDocumentPackageChildren(packageAbs: string, isRoot: boolean) {
+async function migrateDocumentPackageChildren(packageAbs: string) {
   const entries = await fs.readdir(packageAbs, { withFileTypes: true }).catch(() => []);
 
   const subDocsAbs = path.join(packageAbs, CHILD_DOCUMENTS_DIRECTORY);
   if (await pathExists(subDocsAbs)) {
     const subDocEntries = await fs.readdir(subDocsAbs, { withFileTypes: true }).catch(() => []);
     for (const entry of subDocEntries) {
-      if (entry.isDirectory()) await migrateDocumentPackageChildren(path.join(subDocsAbs, entry.name), false);
+      if (entry.isDirectory()) await migrateDocumentPackageChildren(path.join(subDocsAbs, entry.name));
     }
   }
 
@@ -168,17 +169,12 @@ async function migrateDocumentPackageChildren(packageAbs: string, isRoot: boolea
     const childAbs = path.join(packageAbs, entry.name);
     const childHasReadme = await pathExists(path.join(childAbs, "README.md"));
 
-    if (isRoot) {
-      await migrateDocumentPackageChildren(childAbs, false);
-      continue;
-    }
-
     if (!childHasReadme) continue;
     await fs.mkdir(subDocsAbs, { recursive: true });
     const targetAbs = path.join(subDocsAbs, entry.name);
     if (await pathExists(targetAbs)) continue;
     await fs.rename(childAbs, targetAbs);
-    await migrateDocumentPackageChildren(targetAbs, false);
+    await migrateDocumentPackageChildren(targetAbs);
   }
 }
 
@@ -186,7 +182,7 @@ async function ensureStarterDocument(root: string) {
   const markerPath = path.join(root, ".meditations", "starter-created");
   if (await pathExists(markerPath)) return;
 
-  const docsRoot = path.join(root, "docs");
+  const docsRoot = path.join(root, "docs", CHILD_DOCUMENTS_DIRECTORY);
   const entries = await fs.readdir(docsRoot, { withFileTypes: true }).catch(() => []);
   const hasUserDocument = entries.some((entry) => entry.isDirectory() && !["self", "ai-meditations-guide"].includes(entry.name));
   if (hasUserDocument) {
@@ -217,7 +213,7 @@ async function ensureStarterDocument(root: string) {
       "A folder is a document package:",
       "",
       "```text",
-      "docs/example/",
+      "docs/sub_docs/example/",
       "  README.md",
       "  second-page.md",
       "  _attachments/",
@@ -226,7 +222,7 @@ async function ensureStarterDocument(root: string) {
       "      README.md",
       "```",
       "",
-      "`README.md` is the main page. Other Markdown files in the same directory are pages in the same document. `sub_docs/<slug>/` folders are child documents. `_attachments/` belongs to the current document and is not shown as a child document.",
+      "`docs/` is the root document. Top-level documents live under `docs/sub_docs/<slug>/`. `README.md` is the main page. Other Markdown files in the same directory are pages in the same document. `sub_docs/<slug>/` folders are child documents. `_attachments/` belongs to the current document and is not shown as a child document.",
       "",
       "The physical directory tree is the source of truth. Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
       "",
@@ -288,7 +284,7 @@ function defaultAgentsContent() {
     "Directories are document packages:",
     "",
     "```text",
-    "docs/example-document/",
+    "docs/sub_docs/example-document/",
     "  README.md",
     "  second-page.md",
     "  _attachments/",
@@ -297,7 +293,7 @@ function defaultAgentsContent() {
     "      README.md",
     "```",
     "",
-    "`docs/<slug>/` directories are top-level documents under the compiled-wiki root. `README.md` is the body of its directory. Other `.md` files in the same directory are pages in the same document. `sub_docs/<slug>/` directories are child documents. `_attachments/` stores files that belong to the current document and is not a child document.",
+    "`docs/` is the compiled-wiki root document. Top-level documents live under `docs/sub_docs/<slug>/`. `README.md` is the body of its directory. Other `.md` files in the same directory are pages in the same document. `sub_docs/<slug>/` directories are child documents. `_attachments/` stores files that belong to the current document and is not a child document.",
     "",
     "The physical directory tree is the source of truth for parent/child relationships. Do not create hidden JSON indexes, node manifests, or ID-only folders unless the user explicitly asks.",
     "",
